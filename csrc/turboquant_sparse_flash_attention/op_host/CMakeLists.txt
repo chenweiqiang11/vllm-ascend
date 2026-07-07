@@ -20,9 +20,7 @@ if (NOT BUILD_OPEN_PROJECT)
     )
 endif ()
 
-target_sources(opsproto PRIVATE
-        turboquant_sparse_flash_attention_infershape.cpp
-)
+target_sources(opsproto PRIVATE)
 
 set(TURBOQUANT_CANN_PKG_INC
         ${ASCEND_CANN_PACKAGE_PATH}/${CMAKE_SYSTEM_PROCESSOR}-linux/pkg_inc
