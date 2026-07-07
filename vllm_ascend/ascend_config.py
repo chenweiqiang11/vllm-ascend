@@ -158,6 +158,8 @@ class AscendConfig:
             and use_sparse
             and get_ascend_device_type() != AscendDeviceType.A5
         )
+        # TurboQuant 4-bit MLA latent storage (kv_cache[0] uint8 derived slot)
+        self.enable_tq_latent = additional_config.get("enable_tq_latent", False) and use_sparse
 
         self.enable_sp_by_pass = (
             vllm_config.model_config is not None

@@ -1,3 +1,4 @@
+# TQ_LATENT_PATCHED
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
@@ -8,6 +9,18 @@ import vllm.v1.kv_cache_interface
 from typing_extensions import Self
 from vllm.utils.torch_utils import get_dtype_size
 from vllm.v1.kv_cache_interface import MLAAttentionSpec
+
+
+def _tq_packed_bytes(kv_lora_rank: int) -> int:
+    return kv_lora_rank // 2
+
+
+def _tq_base_slot_bytes(kv_lora_rank: int) -> int:
+    return ((_tq_packed_bytes(kv_lora_rank) + 2 + 63) // 64) * 64
+
+
+def _tq_fused_slot_bytes(kv_lora_rank: int, qk_rope_head_dim: int) -> int:
+    return _tq_packed_bytes(kv_lora_rank) + qk_rope_head_dim * 2 + 2
 
 
 @dataclass(frozen=True)
@@ -38,6 +51,7 @@ class AscendMLAAttentionSpec(MLAAttentionSpec):
 
     sparse_head_dim: tuple[int, ...] | None = None
     cache_sparse_c8: bool = False
+    cache_tq_latent: bool = False
     c8_k_cache_dtype: torch.dtype = torch.int8
     c8_k_scale_cache_dtype: torch.dtype = torch.float16
 
@@ -49,7 +63,14 @@ class AscendMLAAttentionSpec(MLAAttentionSpec):
             num_heads_per_page = self.block_size * self.num_kv_heads
             # kv_cache[0]: bfloat16, kv_cache[1]: bfloat16
             kv_lora_rank, qk_rope_head_dim = self.sparse_head_dim[:2]
-            k_pe_nope_bytes = num_heads_per_page * (kv_lora_rank + qk_rope_head_dim) * get_dtype_size(self.dtype)
+            if self.cache_tq_latent:
+                tq_slot_bytes = (_tq_fused_slot_bytes(kv_lora_rank, qk_rope_head_dim)
+                                 if __import__("os").environ.get("TQ_FUSED")
+                                 else _tq_base_slot_bytes(kv_lora_rank))
+                k_pe_nope_bytes = num_heads_per_page * tq_slot_bytes \
+                    + num_heads_per_page * qk_rope_head_dim * get_dtype_size(self.dtype)
+            else:
+                k_pe_nope_bytes = num_heads_per_page * (kv_lora_rank + qk_rope_head_dim) * get_dtype_size(self.dtype)
             # kv_cache[2]: int8
             index_head_dim = self.sparse_head_dim[-1]
             indexer_k_bytes = num_heads_per_page * index_head_dim * get_dtype_size(self.c8_k_cache_dtype)
@@ -83,6 +104,11 @@ class AscendMLAAttentionSpec(MLAAttentionSpec):
             assert self.cache_sparse_c8 is True
 
             kv_lora_rank, qk_rope_head_dim, index_k_head_dim = self.sparse_head_dim
+            if self.cache_tq_latent:
+                tq_slot_bytes = (_tq_fused_slot_bytes(kv_lora_rank, qk_rope_head_dim)
+                                 if __import__("os").environ.get("TQ_FUSED")
+                                 else _tq_base_slot_bytes(kv_lora_rank))
+                kv_lora_rank = tq_slot_bytes // get_dtype_size(self.dtype)
 
             factor = get_dtype_size(self.dtype) // get_dtype_size(self.c8_k_cache_dtype)
             index_k_head_dim_virtual = index_k_head_dim // factor
@@ -132,7 +158,10 @@ class AscendMLAAttentionSpec(MLAAttentionSpec):
             dtype=specs[0].dtype,
             cache_dtype_str=cache_dtype_str_set.pop(),
             cache_sparse_c8=specs[0].cache_sparse_c8,
+            cache_tq_latent=specs[0].cache_tq_latent,
         )
 
 
 vllm.v1.kv_cache_interface.MLAAttentionSpec = AscendMLAAttentionSpec
+
+# TQ_FUSED_PATCHED
