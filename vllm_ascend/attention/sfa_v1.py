@@ -9,11 +9,7 @@ import torch_npu
 
 
 def _tq_store():
-    import sys as _sys
-    _rt = os.environ.get("TQ_RUNTIME_DIR", "/home/cwp/glm51")
-    if _rt not in _sys.path:
-        _sys.path.insert(0, _rt)
-    import tq_latent_store as _tls
+    from vllm_ascend.turboquant import tq_latent_store as _tls
     return _tls
 
 
@@ -1071,12 +1067,7 @@ class AscendSFAImpl(MLAAttentionImpl):
             if ql_nope.shape[0] == block_table.shape[0]:  # DECODE (1 q-tok/req, any batch B) -> fused op
                 _q = torch.cat([_ts.had_fwd(ql_nope, head_dim=self.kv_lora_rank), q_pe], dim=-1).contiguous()
                 if os.environ.get("TQ_CSRC"):
-                    import torch as _tcs
-                    try:
-                        _op = _tcs.ops.tq_sfa.npu_tqc_sparse_flash_attention
-                    except (AttributeError, RuntimeError):
-                        _tcs.ops.load_library("/root/.cache/torch_extensions/py311_cpu/tq_sfa_ext/tq_sfa_ext.so")
-                        _op = _tcs.ops.tq_sfa.npu_tqc_sparse_flash_attention
+                    _op = torch.ops._C_ascend.turboquant_sparse_flash_attention
                     _ao = _op(
                         _q, kv, kv, topk_indices, None, None, block_table,
                         actual_seq_lengths_query, actual_seq_lengths_key,
@@ -1094,11 +1085,7 @@ class AscendSFAImpl(MLAAttentionImpl):
                     tile_size=self.tq_tile_size, rope_head_dim=self.qk_rope_head_dim)
                 return _ts.had_inv(_ao, head_dim=self.kv_lora_rank)
             else:  # PREFILL -> dequant combined TQ4 slot + old SFA (fused kernel dense-prefill bug >1024 ctx)
-                import sys as _sysfb
-                _rtfb = os.environ.get("TQ_RUNTIME_DIR", "/home/cwp/glm51")
-                if _rtfb not in _sysfb.path:
-                    _sysfb.path.insert(0, _rtfb)
-                import tq_prefill_fallback as _fb
+                from vllm_ascend.turboquant import tq_prefill_fallback as _fb
                 _kvd, _rope_c, _bt_c = _fb.dequant_combined_386(
                     kv, block_table, ql_nope.dtype, head_dim=self.kv_lora_rank,
                     rope_head_dim=self.qk_rope_head_dim)

@@ -42,6 +42,7 @@
 #include "moe_gating_top_k/moe_gating_top_k_torch_adpt.h"
 #include "moe_init_routing_custom/moe_init_routing_custom_torch_adpt.h"
 #include "sparse_flash_attention/sparse_flash_attention_torch_adpt.h"
+#include "turboquant_sparse_flash_attention/turboquant_sparse_flash_attention_torch_adpt.h"
 #include "lightning_indexer_quant/lightning_indexer_quant_torch_adpt.h"
 #include <c10/core/Device.h>
 #include <c10/util/Exception.h>
@@ -805,6 +806,19 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
         "                           int sparse_mode=3) -> Tensor"
     );
     ops.impl("npu_sparse_flash_attention", torch::kPrivateUse1, &vllm_ascend::npu_sparse_flash_attention);
+    ops.def(
+        "turboquant_sparse_flash_attention(Tensor query, Tensor key, Tensor value, Tensor sparse_indices, "
+        "                                 Tensor? key_dequant_scale, Tensor? value_dequant_scale, "
+        "                                 Tensor? block_table, Tensor? actual_seq_lengths_query, "
+        "                                 Tensor? actual_seq_lengths_kv, float scale_value, "
+        "                                 int key_quant_mode, int value_quant_mode, int sparse_block_size, "
+        "                                 str layout_query, str layout_kv, int sparse_mode, int pre_tokens, "
+        "                                 int next_tokens, int attention_mode, int quant_scale_repo_mode, "
+        "                                 int tile_size, int rope_head_dim) -> Tensor"
+    );
+    ops.impl("turboquant_sparse_flash_attention",
+             torch::kPrivateUse1,
+             &vllm_ascend::turboquant_sparse_flash_attention);
 
     ops.def(
         "dispatch_ffn_combine(Tensor x, Tensor[] weight1, Tensor[] weight2, Tensor expert_idx,"
