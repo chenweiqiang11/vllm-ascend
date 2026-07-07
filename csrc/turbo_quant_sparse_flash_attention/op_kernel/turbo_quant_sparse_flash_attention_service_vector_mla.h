@@ -9,7 +9,7 @@
  */
 
 /*!
- * \file turboquant_sparse_flash_attention_service_vector_mla.h
+ * \file turbo_quant_sparse_flash_attention_service_vector_mla.h
  * \brief
  */
 #ifndef TURBOQUANT_SPARSE_FLASH_ATTENTION_SERVICE_VECTOR_MLA_H
@@ -20,7 +20,7 @@
 #include "kernel_tiling/kernel_tiling.h"
 #include "lib/matmul_intf.h"
 #include "lib/matrix/matmul/tiling.h"
-#include "turboquant_sparse_flash_attention_common.h"
+#include "turbo_quant_sparse_flash_attention_common.h"
 #include "tq4_centroids.h"
 
 using AscendC::CrossCoreSetFlag;

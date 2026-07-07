@@ -9,7 +9,7 @@
  */
  
 /*!
- * \file turboquant_sparse_flash_attention_def.cpp
+ * \file turbo_quant_sparse_flash_attention_def.cpp
  * \brief
  */
 

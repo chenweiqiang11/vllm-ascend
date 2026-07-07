@@ -9,7 +9,7 @@
  */
 
 /*!
- * \file turboquant_sparse_flash_attention_common.h
+ * \file turbo_quant_sparse_flash_attention_common.h
  * \brief
  */
 
@@ -17,7 +17,7 @@
 #define TURBOQUANT_SPARSE_FLASH_ATTENTION_COMMON_H
 
 #include "kernel_operator.h"
-#include "turboquant_sparse_flash_attention_tiling_data.h"
+#include "kernel_tiling/kernel_tiling.h"
 #include "lib/matmul_intf.h"
 #include "lib/matrix/matmul/tiling.h"
 

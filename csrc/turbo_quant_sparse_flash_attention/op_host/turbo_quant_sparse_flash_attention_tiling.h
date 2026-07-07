@@ -9,7 +9,7 @@
  */
 
 /*!
- * \file turboquant_sparse_flash_attention_tiling.h
+ * \file turbo_quant_sparse_flash_attention_tiling.h
  * \brief
  */
 #ifndef TURBOQUANT_SPARSE_FLASH_ATTENTION_TILING_H

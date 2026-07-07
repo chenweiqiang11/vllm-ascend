@@ -42,7 +42,7 @@
 #include "moe_gating_top_k/moe_gating_top_k_torch_adpt.h"
 #include "moe_init_routing_custom/moe_init_routing_custom_torch_adpt.h"
 #include "sparse_flash_attention/sparse_flash_attention_torch_adpt.h"
-#include "turboquant_sparse_flash_attention/turboquant_sparse_flash_attention_torch_adpt.h"
+#include "turbo_quant_sparse_flash_attention/turbo_quant_sparse_flash_attention_torch_adpt.h"
 #include "lightning_indexer_quant/lightning_indexer_quant_torch_adpt.h"
 #include <c10/core/Device.h>
 #include <c10/util/Exception.h>

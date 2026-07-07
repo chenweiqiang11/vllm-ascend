@@ -9,7 +9,7 @@
  */
 
 /*!
- * \file turboquant_sparse_flash_attention_kernel_mla.h
+ * \file turbo_quant_sparse_flash_attention_kernel_mla.h
  * \brief
  */
 
@@ -21,9 +21,9 @@
 #include "kernel_tiling/kernel_tiling.h"
 #include "lib/matmul_intf.h"
 #include "lib/matrix/matmul/tiling.h"
-#include "turboquant_sparse_flash_attention_common.h"
-#include "turboquant_sparse_flash_attention_service_cube_mla.h"
-#include "turboquant_sparse_flash_attention_service_vector_mla.h"
+#include "turbo_quant_sparse_flash_attention_common.h"
+#include "turbo_quant_sparse_flash_attention_service_cube_mla.h"
+#include "turbo_quant_sparse_flash_attention_service_vector_mla.h"
 
 using namespace matmul;
 using AscendC::CacheMode;

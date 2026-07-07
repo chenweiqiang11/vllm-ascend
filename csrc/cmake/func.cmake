@@ -50,7 +50,7 @@ function(op_add_subdirectory OP_LIST OP_DIR_LIST)
         get_filename_component(OP_DIR "${OP_HOST_DIR}" DIRECTORY)
         get_filename_component(OP_NAME "${OP_DIR}" NAME)
 
-        if ("${OP_NAME}" STREQUAL "turboquant_sparse_flash_attention" AND "${ASCEND_COMPUTE_UNIT}" MATCHES "ascend950")
+        if ("${OP_NAME}" STREQUAL "turbo_quant_sparse_flash_attention" AND "${ASCEND_COMPUTE_UNIT}" MATCHES "ascend950")
             continue()
         endif ()
 

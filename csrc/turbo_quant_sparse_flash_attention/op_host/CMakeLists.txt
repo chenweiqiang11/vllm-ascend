@@ -7,16 +7,16 @@ add_ops_compile_options(
 )
 
 target_sources(op_host_aclnn PRIVATE
-        turboquant_sparse_flash_attention_def.cpp
+        turbo_quant_sparse_flash_attention_def.cpp
 )
 
 target_sources(optiling PRIVATE
-        turboquant_sparse_flash_attention_tiling.cpp
+        turbo_quant_sparse_flash_attention_tiling.cpp
 )
 
 if (NOT BUILD_OPEN_PROJECT)
     target_sources(opmaster_ct PRIVATE
-        turboquant_sparse_flash_attention_tiling.cpp
+        turbo_quant_sparse_flash_attention_tiling.cpp
     )
 endif ()
 
@@ -34,6 +34,7 @@ target_include_directories(optiling PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${TURBOQUANT_CANN_PKG_INC}
 )
+target_link_libraries(optiling PRIVATE ${ASCEND_CANN_PACKAGE_PATH}/${CMAKE_SYSTEM_PROCESSOR}-linux/lib64/libops_base.so)
 target_include_directories(opsproto PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${TURBOQUANT_CANN_PKG_INC}

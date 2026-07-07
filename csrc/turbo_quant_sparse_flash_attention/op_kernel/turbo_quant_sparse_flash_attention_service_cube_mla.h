@@ -9,7 +9,7 @@
  */
 
 /*!
- * \file turboquant_sparse_flash_attention_service_cube_mla.h
+ * \file turbo_quant_sparse_flash_attention_service_cube_mla.h
  * \brief use 7 buffer for matmul l1, better pipeline
  */
 #ifndef TURBOQUANT_SPARSE_FLASH_ATTENTION_SERVICE_CUBE_MLA_H
@@ -20,7 +20,7 @@
 #include "kernel_tiling/kernel_tiling.h"
 #include "lib/matmul_intf.h"
 #include "lib/matrix/matmul/tiling.h"
-#include "turboquant_sparse_flash_attention_common.h"
+#include "turbo_quant_sparse_flash_attention_common.h"
 
 struct Position {
     uint32_t bIdx;

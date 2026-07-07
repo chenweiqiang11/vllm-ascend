@@ -9,7 +9,7 @@
  */
 
 /*!
- * \file turboquant_sparse_flash_attention_tiling.cpp
+ * \file turbo_quant_sparse_flash_attention_tiling.cpp
  * \brief
  */
 
@@ -20,8 +20,8 @@
 #include <graph/utils/type_utils.h>
 #include "err/ops_err.h"
 #include "register/op_def_registry.h"
-#include "../op_kernel/turboquant_sparse_flash_attention_template_tiling_key.h"
-#include "turboquant_sparse_flash_attention_tiling.h"
+#include "../op_kernel/turbo_quant_sparse_flash_attention_template_tiling_key.h"
+#include "turbo_quant_sparse_flash_attention_tiling.h"
 
 using std::map;
 using std::string;
