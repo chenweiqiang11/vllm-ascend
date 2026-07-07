@@ -9,18 +9,18 @@
  */
 
 /*!
- * \file tqc_sparse_flash_attention_service_cube_mla.h
+ * \file turboquant_sparse_flash_attention_service_cube_mla.h
  * \brief use 7 buffer for matmul l1, better pipeline
  */
-#ifndef TQC_SPARSE_FLASH_ATTENTION_SERVICE_CUBE_MLA_H
-#define TQC_SPARSE_FLASH_ATTENTION_SERVICE_CUBE_MLA_H
+#ifndef TURBOQUANT_SPARSE_FLASH_ATTENTION_SERVICE_CUBE_MLA_H
+#define TURBOQUANT_SPARSE_FLASH_ATTENTION_SERVICE_CUBE_MLA_H
 
 #include "kernel_operator.h"
 #include "kernel_operator_list_tensor_intf.h"
 #include "kernel_tiling/kernel_tiling.h"
 #include "lib/matmul_intf.h"
 #include "lib/matrix/matmul/tiling.h"
-#include "tqc_sparse_flash_attention_common.h"
+#include "turboquant_sparse_flash_attention_common.h"
 
 struct Position {
     uint32_t bIdx;
@@ -940,4 +940,4 @@ __aicore__ inline void QSFAMatmulService<QSFAT>::ComputeMm2(const RunInfo &info,
     qpL1BufIter += mL1Loops;
 }
 
-#endif // TQC_SPARSE_FLASH_ATTENTION_SERVICE_CUBE_MLA_H
+#endif // TURBOQUANT_SPARSE_FLASH_ATTENTION_SERVICE_CUBE_MLA_H

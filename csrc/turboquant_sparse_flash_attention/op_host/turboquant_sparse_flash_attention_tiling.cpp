@@ -9,7 +9,7 @@
  */
 
 /*!
- * \file tqc_sparse_flash_attention_tiling.cpp
+ * \file turboquant_sparse_flash_attention_tiling.cpp
  * \brief
  */
 
@@ -20,8 +20,8 @@
 #include <graph/utils/type_utils.h>
 #include "err/ops_err.h"
 #include "register/op_def_registry.h"
-#include "../op_kernel/tqc_sparse_flash_attention_template_tiling_key.h"
-#include "tqc_sparse_flash_attention_tiling.h"
+#include "../op_kernel/turboquant_sparse_flash_attention_template_tiling_key.h"
+#include "turboquant_sparse_flash_attention_tiling.h"
 
 using std::map;
 using std::string;
@@ -93,7 +93,7 @@ const std::map<ge::DataType, std::string> DATATYPE_TO_STRING_MAP = {
     {ge::DT_UINT1, "DT_UINT1"}                    // dt_variant type
 };
 
-struct TqcSparseFlashAttentionCompileInfo {
+struct TurboQuantSparseFlashAttentionCompileInfo {
     int64_t coreNum;
 };
 
@@ -266,7 +266,7 @@ void QSFAMlaTiling::ZeroTensorProcess() const
 {
     if (qsfaInfo_->s2Size == 0) {
         /*
-         * 1024，空tensor场景下，作为默认值完成后续计�?
+         * 1024，空tensor场景下，作为默认值完成后续计�?
          * 避免matmal tiling  softmax tiling异常
          * kernel计算使用真实的seqSize=0, 与actuseq_len流程归一
          */
@@ -279,7 +279,7 @@ void QSFAMlaTiling::InitParams()
     perfMode_ = QSFAPerfMode::V_TEMPLATE_MODE;
     coreNum_ = aicNum_;
 
-    headDimAlign_ = Align(qsfaInfo_->qHeadDim, BYTE_BLOCK); // 元素个数按照基本块大小对�?
+    headDimAlign_ = Align(qsfaInfo_->qHeadDim, BYTE_BLOCK); // 元素个数按照基本块大小对�?
     ZeroTensorProcess();
 }
 
@@ -307,7 +307,7 @@ void QSFAMlaTiling::CalcInnerSize(uint32_t qsfaS2Size)
     // FlashDecode时，如果S2的计算量>=256(确保切分后不小于128)但又不足以分2次计算时，则修改sInnerSize_，均分为2份进行计算，确保Nbuffer=2
     if (splitKVFlag_ && qsfaInfo_->qLayout != QSFALayout::TND) {
         if (qsfaS2Size == 256) {   // 256:s2Size的阈值，判断sInnerSize_是否切分
-            sInnerSize_ = 128; // 128:sInnerSize_值为s2Size的一半，均分�?份进行计算，
+            sInnerSize_ = 128; // 128:sInnerSize_值为s2Size的一半，均分�?份进行计算，
         } else if (qsfaS2Size > 256 && qsfaS2Size <= sInnerSize_) { // 256:s2Size的阈值，判断sInnerSize_是否切分
             sInnerSize_ = (sInnerSize_ + 1) / 2; // 2:减半
         }
@@ -319,7 +319,7 @@ void QSFAMlaTiling::CalcInnerSize(uint32_t qsfaS2Size)
         sInnerSize_ = qsfaS2Size;
     }
     sInnerSizeAlign_ =
-        Align(sInnerSize_, BYTE_BLOCK); // 元素个数按照基本块大小对�?
+        Align(sInnerSize_, BYTE_BLOCK); // 元素个数按照基本块大小对�?
     CheckUbSpace();
 }
 
@@ -370,9 +370,9 @@ void QSFAMlaTiling::FillTilingBaseParamsMla()
 void QSFAMlaTiling::FillTilingSplitKVMla()
 {
     tilingData_.splitKVParams.set_s2(kvSplitPart_);
-    // 2:每个核可能有头规约和尾规约，一共两份规约信�?
+    // 2:每个核可能有头规约和尾规约，一共两份规约信�?
     tilingData_.splitKVParams.set_accumOutSize(aicNum_ * 2 * qsfaInfo_->n2Size * mBaseSize_ * headDimAlign_);
-    // 2:每个核可能有头规约和尾规约，一共两份规约信�?sum + max
+    // 2:每个核可能有头规约和尾规约，一共两份规约信�?sum + max
     tilingData_.splitKVParams.set_logSumExpSize(2 * aicNum_ * 2 * qsfaInfo_->n2Size * mBaseSize_ *
                                                 (BYTE_BLOCK / BLOCK_TABLE_ELEM_BYTE));
 
@@ -402,7 +402,7 @@ void QSFAMlaTiling::FillTiling()
 
 uint32_t QSFAMlaTiling::CalcBalanceFDParamNums(const uint32_t actCoreNum) const
 {
-    return actCoreNum * 2 * qsfaInfo_->n2Size * mBaseSize_; // 2:每个核可能有头规约和尾规约，一共两份规约信�?
+    return actCoreNum * 2 * qsfaInfo_->n2Size * mBaseSize_; // 2:每个核可能有头规约和尾规约，一共两份规约信�?
 }
 
 void QSFAMlaTiling::NormalCalcFDWorkSpace(const uint32_t actCoreNum)
@@ -412,10 +412,10 @@ void QSFAMlaTiling::NormalCalcFDWorkSpace(const uint32_t actCoreNum)
         uint32_t logSumExpSize = 0;
         uint32_t FDParamNums = CalcBalanceFDParamNums(actCoreNum);
         accumOutSize = FDParamNums * headDimAlign_;
-        logSumExpSize = 2 * FDParamNums * (BYTE_BLOCK / qsfaInfo_->blockTypeSize); // log和sum的存储空间一致，共需�?份内�?
+        logSumExpSize = 2 * FDParamNums * (BYTE_BLOCK / qsfaInfo_->blockTypeSize); // log和sum的存储空间一致，共需�?份内�?
         workspaceSize_ += (accumOutSize + logSumExpSize) * qsfaInfo_->blockTypeSize;
         if (qsfaInfo_->npuArch == NpuArch::DAV_2002) { // 310P
-            workspaceSize_ += static_cast<size_t>(actCoreNum) * 32; // 每个核SyncAll软同步需�?2Byte记录状�?
+            workspaceSize_ += static_cast<size_t>(actCoreNum) * 32; // 每个核SyncAll软同步需�?2Byte记录状�?
         }
     }
 }
@@ -485,7 +485,7 @@ ge::graphStatus QSFAMlaTiling::DoOpTiling(QSFATilingInfo *qsfaInfo)
     return ge::GRAPH_SUCCESS;
 }
 
-ge::graphStatus TilingTqcSparseFlashAttention(gert::TilingContext *context)
+ge::graphStatus TilingTurboQuantSparseFlashAttention(gert::TilingContext *context)
 {
     QSFATilingInfo qsfaInfo;
     QSFAInfoParser qsfaInfoParser(context);
@@ -502,7 +502,7 @@ ge::graphStatus TilingTqcSparseFlashAttention(gert::TilingContext *context)
     return tiling.DoOpTiling(&qsfaInfo);
 }
 
-ge::graphStatus TilingPrepareForTqcSparseFlashAttention(gert::TilingParseContext* const context)
+ge::graphStatus TilingPrepareForTurboQuantSparseFlashAttention(gert::TilingParseContext* const context)
 {
     (void)context;
     return ge::GRAPH_SUCCESS;
@@ -1536,9 +1536,9 @@ ge::graphStatus QSFAInfoParser::GetInOutDataType()
 
 ge::graphStatus QSFAInfoParser::GetBatchSize()
 {
-    // 获取B基准�?
-    // 1、非TND�? 以query的batch_size维度为基�?
-    // 2、TND�? actual_seq_lens_q必须传入, 以actual_seq_lens_q数组的长度为B轴大�?
+    // 获取B基准�?
+    // 1、非TND�? 以query的batch_size维度为基�?
+    // 2、TND�? actual_seq_lens_q必须传入, 以actual_seq_lens_q数组的长度为B轴大�?
     if (qLayout_ == QSFALayout::TND) {
         return GetActualSeqLenQSize(bSize_);
     } else { // BSND
@@ -1549,43 +1549,43 @@ ge::graphStatus QSFAInfoParser::GetBatchSize()
 
 ge::graphStatus QSFAInfoParser::GetQTSize()
 {
-    // 获取query的T基准�?
-    // 1、非TND�? 以query的batch_size维度为基�?
-    // 2、TND�? actual_seq_lens_q必须传入, 以actual_seq_lens_q数组的长度为B轴大�?
+    // 获取query的T基准�?
+    // 1、非TND�? 以query的batch_size维度为基�?
+    // 2、TND�? actual_seq_lens_q必须传入, 以actual_seq_lens_q数组的长度为B轴大�?
     qTSize_ = (qLayout_ == QSFALayout::TND) ? GetAxisNum(queryShape_, QSFAAxis::T, qLayout_) : 0;
     return ge::GRAPH_SUCCESS;
 }
 
 ge::graphStatus QSFAInfoParser::GetKVTSize()
 {
-    // 获取query的T基准�?
-    // 1、非TND�? 以key的batch_size维度为基�?
-    // 2、TND�? actual_seq_lens_q必须传入, 以actual_seq_lens_q数组的长度为B轴大�?
+    // 获取query的T基准�?
+    // 1、非TND�? 以key的batch_size维度为基�?
+    // 2、TND�? actual_seq_lens_q必须传入, 以actual_seq_lens_q数组的长度为B轴大�?
     kvTSize_ = (kvLayout_ == QSFALayout::TND) ? GetAxisNum(keyShape_, QSFAAxis::T, kvLayout_) : 0;
     return ge::GRAPH_SUCCESS;
 }
 
 ge::graphStatus QSFAInfoParser::GetQHeadDim()
 {
-    // 获取qHeadDim基准�?
-    // 以query的D维度为基�?
+    // 获取qHeadDim基准�?
+    // 以query的D维度为基�?
     qHeadDim_ = GetAxisNum(queryShape_, QSFAAxis::D, qLayout_);
     return ge::GRAPH_SUCCESS;
 }
 
 ge::graphStatus QSFAInfoParser::GetKHeadDim()
 {
-    // 获取kHeadDim基准�?
-    // 以key的D维度为基�?
+    // 获取kHeadDim基准�?
+    // 以key的D维度为基�?
     kHeadDim_ = GetAxisNum(keyShape_, QSFAAxis::D, kvLayout_);
     return ge::GRAPH_SUCCESS;
 }
 
 ge::graphStatus QSFAInfoParser::GetS1Size()
 {
-    // 获取S1基准�?
-    // 1、非TND�? 以query的S维度为基�?
-    // 2、TND�? actual_seq_lens_q必须传入, 以actual_seq_lens_q数组中的最大值为基准
+    // 获取S1基准�?
+    // 1、非TND�? 以query的S维度为基�?
+    // 2、TND�? actual_seq_lens_q必须传入, 以actual_seq_lens_q数组中的最大值为基准
     if (qLayout_ == QSFALayout::TND) {
         s1Size_ = GetAxisNum(queryShape_, QSFAAxis::T, qLayout_);
         return ge::GRAPH_SUCCESS;
@@ -1602,7 +1602,7 @@ ge::graphStatus QSFAInfoParser::GetKvStorageMode()
     } else {
         kvStorageMode_ = KvStorageMode::BATCH_CONTINUOUS;
     }
-    // kv存储模式基准�?
+    // kv存储模式基准�?
     return ge::GRAPH_SUCCESS;
 }
 
@@ -1696,9 +1696,9 @@ ge::graphStatus QSFAInfoParser::GetS2SizeForPageAttention()
 
 ge::graphStatus QSFAInfoParser::GetS2Size()
 {
-    // 获取S2基准�?
-    // 1、BATCH_CONTINUOUS�? 从key的S轴获�?
-    // 2、PAGE_ATTENTION�? S2 = block_table.dim1 * block_size
+    // 获取S2基准�?
+    // 1、BATCH_CONTINUOUS�? 从key的S轴获�?
+    // 2、PAGE_ATTENTION�? S2 = block_table.dim1 * block_size
     if (kvStorageMode_ == KvStorageMode::BATCH_CONTINUOUS) {
         return GetS2SizeForBatchContinuous();
     }
@@ -1707,8 +1707,8 @@ ge::graphStatus QSFAInfoParser::GetS2Size()
 
 ge::graphStatus QSFAInfoParser::GetValueHeadDim()
 {
-    // 获取vHeadDim基准�?
-    // 以value的D维度为基�?
+    // 获取vHeadDim基准�?
+    // 以value的D维度为基�?
     vHeadDim_ = GetAxisNum(valueShape_, QSFAAxis::D, kvLayout_);
     return ge::GRAPH_SUCCESS;
 }
@@ -1721,7 +1721,7 @@ ge::graphStatus QSFAInfoParser::GetDSizeKV()
 
 ge::graphStatus QSFAInfoParser::GetQueryAndOutLayout()
 {
-    // 获取query和attentionOut的Layout基准�?
+    // 获取query和attentionOut的Layout基准�?
     // layoutQuery: {qLayout, outLayout}
     const std::map<std::string, std::pair<QSFALayout, QSFALayout>> qsfaLayoutMap = {
         {"BSND",        {QSFALayout::BSND,    QSFALayout::BSND}},
@@ -1920,6 +1920,6 @@ ge::graphStatus QSFAInfoParser::Parse(QSFATilingInfo &qsfaInfo)
 }
 
 IMPL_OP_OPTILING(TurboQuantSparseFlashAttention)
-    .Tiling(TilingTqcSparseFlashAttention)
-    .TilingParse<TqcSparseFlashAttentionCompileInfo>(TilingPrepareForTqcSparseFlashAttention);
+    .Tiling(TilingTurboQuantSparseFlashAttention)
+    .TilingParse<TurboQuantSparseFlashAttentionCompileInfo>(TilingPrepareForTurboQuantSparseFlashAttention);
 } // namespace optiling

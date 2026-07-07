@@ -9,18 +9,18 @@
  */
 
 /*!
- * \file tqc_sparse_flash_attention_service_vector_mla.h
+ * \file turboquant_sparse_flash_attention_service_vector_mla.h
  * \brief
  */
-#ifndef TQC_SPARSE_FLASH_ATTENTION_SERVICE_VECTOR_MLA_H
-#define TQC_SPARSE_FLASH_ATTENTION_SERVICE_VECTOR_MLA_H
+#ifndef TURBOQUANT_SPARSE_FLASH_ATTENTION_SERVICE_VECTOR_MLA_H
+#define TURBOQUANT_SPARSE_FLASH_ATTENTION_SERVICE_VECTOR_MLA_H
 
 #include "kernel_operator.h"
 #include "kernel_operator_list_tensor_intf.h"
 #include "kernel_tiling/kernel_tiling.h"
 #include "lib/matmul_intf.h"
 #include "lib/matrix/matmul/tiling.h"
-#include "tqc_sparse_flash_attention_common.h"
+#include "turboquant_sparse_flash_attention_common.h"
 #include "tq4_centroids.h"
 
 using AscendC::CrossCoreSetFlag;
@@ -43,7 +43,7 @@ public:
     __aicore__ inline void ProcessVec2L(const RunInfo &info);
     __aicore__ inline void InitBuffers(TPipe *pipe);
     __aicore__ inline void InitParams(const struct ConstInfo &constInfo,
-                                      const TqcSparseFlashAttentionTilingDataMla *__restrict tilingData);
+                                      const TurboQuantSparseFlashAttentionTilingDataMla *__restrict tilingData);
     __aicore__ inline void InitMm2ResInt32GmGlobalTensor(GlobalTensor<int32_t> mm2ResInt32Gm);
     __aicore__ inline void InitVec0GlobalTensor(const GlobalTensor<int32_t> &kvValidSizeGm,
                                                 const GlobalTensor<K_ROPE_T> &kvMergeGm,
@@ -149,7 +149,7 @@ private:
     static constexpr T SOFTMAX_MIN_NUM = -2e38;
     static constexpr int32_t TQ4_DEQUANT_CHUNK = 4;
 
-    const TqcSparseFlashAttentionTilingDataMla *__restrict tilingData;
+    const TurboQuantSparseFlashAttentionTilingDataMla *__restrict tilingData;
 
     uint32_t pingpongFlag = 0U;
     ConstInfo constInfo = {};
@@ -251,7 +251,7 @@ template <typename QSFAT> __aicore__ inline void QSFAVectorService<QSFAT>::InitB
 template <typename QSFAT>
 __aicore__ inline void
 QSFAVectorService<QSFAT>::InitParams(const struct ConstInfo &constInfo,
-                                     const TqcSparseFlashAttentionTilingDataMla *__restrict tilingData)
+                                     const TurboQuantSparseFlashAttentionTilingDataMla *__restrict tilingData)
 {
     this->constInfo = constInfo;
     this->tilingData = tilingData;
@@ -1423,4 +1423,4 @@ QSFAVectorService<QSFAT>::RowMuls(LocalTensor<T> dstUb, LocalTensor<T> src0Ub, L
     }
 }
 
-#endif // TQC_SPARSE_FLASH_ATTENTION_SERVICE_VECTOR_MLA_H
+#endif // TURBOQUANT_SPARSE_FLASH_ATTENTION_SERVICE_VECTOR_MLA_H

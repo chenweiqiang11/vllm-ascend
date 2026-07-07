@@ -9,7 +9,7 @@
  */
  
 /*!
- * \file tqc_sparse_flash_attention_def.cpp
+ * \file turboquant_sparse_flash_attention_def.cpp
  * \brief
  */
 
@@ -79,8 +79,8 @@ public:
         this->Attr("next_tokens").AttrType(OPTIONAL).Int(INT64_MAX);
         this->Attr("attention_mode").AttrType(OPTIONAL).Int(0);
         this->Attr("quant_scale_repo_mode").AttrType(OPTIONAL).Int(1);
-        this->Attr("tile_size").AttrType(OPTIONAL).Int(128);     // 128:默认�?
-        this->Attr("rope_head_dim").AttrType(OPTIONAL).Int(64);  // 64:默认�?
+        this->Attr("tile_size").AttrType(OPTIONAL).Int(128);     // 128:默认�?
+        this->Attr("rope_head_dim").AttrType(OPTIONAL).Int(64);  // 64:默认�?
         OpAICoreConfig aicore_config;
         aicore_config.DynamicCompileStaticFlag(true)
             .DynamicFormatFlag(true)

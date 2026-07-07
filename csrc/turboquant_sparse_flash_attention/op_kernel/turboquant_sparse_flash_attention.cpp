@@ -9,13 +9,13 @@
  */
 
  /*!
- * \file tqc_sparse_flash_attention.cpp
+ * \file turboquant_sparse_flash_attention.cpp
  * \brief
  */
 
 #include "kernel_operator.h"
-#include "tqc_sparse_flash_attention_template_tiling_key.h"
-#include "tqc_sparse_flash_attention_kernel_mla.h"
+#include "turboquant_sparse_flash_attention_template_tiling_key.h"
+#include "turboquant_sparse_flash_attention_kernel_mla.h"
 
 using namespace AscendC;
 #define QSFA_OP_IMPL(templateClass, tilingdataClass, ...)                                         \
@@ -43,11 +43,11 @@ turboquant_sparse_flash_attention(__gm__ uint8_t *query, __gm__ uint8_t *key, __
     __gm__ uint8_t *user = GetUserWorkspace(workspace);
     if constexpr (ORIG_DTYPE_QUERY == DT_FLOAT16 && ORIG_DTYPE_KEY == DT_INT8 &&
                   ORIG_DTYPE_ATTENTION_OUT == DT_FLOAT16) {
-        QSFA_OP_IMPL(TqcSparseFlashAttentionMla, TqcSparseFlashAttentionTilingDataMla, half, int8_t,
+        QSFA_OP_IMPL(TurboQuantSparseFlashAttentionMla, TurboQuantSparseFlashAttentionTilingDataMla, half, int8_t,
             half, FLASH_DECODE, static_cast<QSFA_LAYOUT>(LAYOUT_T), static_cast<QSFA_LAYOUT>(KV_LAYOUT_T),
             TEMPLATE_MODE);
     } else { // bf16
-        QSFA_OP_IMPL(TqcSparseFlashAttentionMla, TqcSparseFlashAttentionTilingDataMla, bfloat16_t, int8_t,
+        QSFA_OP_IMPL(TurboQuantSparseFlashAttentionMla, TurboQuantSparseFlashAttentionTilingDataMla, bfloat16_t, int8_t,
             bfloat16_t, FLASH_DECODE, static_cast<QSFA_LAYOUT>(LAYOUT_T), static_cast<QSFA_LAYOUT>(KV_LAYOUT_T),
             TEMPLATE_MODE);
     }

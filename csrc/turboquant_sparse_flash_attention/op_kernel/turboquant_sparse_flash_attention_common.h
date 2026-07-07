@@ -9,15 +9,15 @@
  */
 
 /*!
- * \file tqc_sparse_flash_attention_common.h
+ * \file turboquant_sparse_flash_attention_common.h
  * \brief
  */
 
-#ifndef TQC_SPARSE_FLASH_ATTENTION_COMMON_H
-#define TQC_SPARSE_FLASH_ATTENTION_COMMON_H
+#ifndef TURBOQUANT_SPARSE_FLASH_ATTENTION_COMMON_H
+#define TURBOQUANT_SPARSE_FLASH_ATTENTION_COMMON_H
 
 #include "kernel_operator.h"
-#include "tqc_sparse_flash_attention_tiling_data.h"
+#include "turboquant_sparse_flash_attention_tiling_data.h"
 #include "lib/matmul_intf.h"
 #include "lib/matrix/matmul/tiling.h"
 
@@ -223,4 +223,4 @@ struct MSplitInfo {
     uint32_t vecDealM = 0U;
 };
 
-#endif // TQC_SPARSE_FLASH_ATTENTION_COMMON_H
+#endif // TURBOQUANT_SPARSE_FLASH_ATTENTION_COMMON_H

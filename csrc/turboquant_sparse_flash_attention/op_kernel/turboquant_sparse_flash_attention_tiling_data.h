@@ -1,7 +1,7 @@
-#ifndef TQC_SFA_TILING_DATA_H
-#define TQC_SFA_TILING_DATA_H
+#ifndef TURBOQUANT_SFA_TILING_DATA_H
+#define TURBOQUANT_SFA_TILING_DATA_H
 #include <cstdint>
-struct alignas(8) TqcSparseFlashAttentionBaseParamsMla {
+struct alignas(8) TurboQuantSparseFlashAttentionBaseParamsMla {
 uint32_t batchSize;
 uint32_t seqSize;
 uint32_t qSeqSize;
@@ -24,28 +24,28 @@ int64_t tileSize;
 uint32_t isActualLenDimsNull;
 uint32_t isActualLenDimsKVNull;
 };
-struct alignas(8) TqcSparseFlashAttentionSingleCoreParamsMla {
+struct alignas(8) TurboQuantSparseFlashAttentionSingleCoreParamsMla {
 uint32_t usedCoreNum;
 };
-struct alignas(8) TqcSparseFlashAttentionSingleCoreTensorSizeMla {
+struct alignas(8) TurboQuantSparseFlashAttentionSingleCoreTensorSizeMla {
 uint32_t mmResUbSize;
 uint32_t bmm2ResUbSize;
 };
-struct alignas(8) TqcSparseFlashAttentionSplitKVParamsMla {
+struct alignas(8) TurboQuantSparseFlashAttentionSplitKVParamsMla {
 uint32_t s2;             // S2切分份数
 uint32_t accumOutSize;   // FD workspace
 uint32_t logSumExpSize;  // FD workspace
 };
-struct alignas(8) TqcSparseFlashAttentionInnerSplitParams {
+struct alignas(8) TurboQuantSparseFlashAttentionInnerSplitParams {
 uint32_t mBaseSize;
 uint32_t s2BaseSize;
 };
-struct alignas(8) TqcSparseFlashAttentionTilingDataMla {
-TqcSparseFlashAttentionBaseParamsMla baseParams;
-TqcSparseFlashAttentionSplitKVParamsMla splitKVParams;
-TqcSparseFlashAttentionSingleCoreParamsMla singleCoreParams;
-TqcSparseFlashAttentionSingleCoreTensorSizeMla singleCoreTensorSize;
-TqcSparseFlashAttentionInnerSplitParams innerSplitParams;
+struct alignas(8) TurboQuantSparseFlashAttentionTilingDataMla {
+TurboQuantSparseFlashAttentionBaseParamsMla baseParams;
+TurboQuantSparseFlashAttentionSplitKVParamsMla splitKVParams;
+TurboQuantSparseFlashAttentionSingleCoreParamsMla singleCoreParams;
+TurboQuantSparseFlashAttentionSingleCoreTensorSizeMla singleCoreTensorSize;
+TurboQuantSparseFlashAttentionInnerSplitParams innerSplitParams;
 };
 #ifndef GET_TILING_DATA_WITH_STRUCT
 #define GET_TILING_DATA_WITH_STRUCT(tiling_struct, tiling_data, tiling_arg) \

@@ -9,12 +9,12 @@
  */
 
 /*!
- * \file tqc_sparse_flash_attention_template_tiling_key.h
+ * \file turboquant_sparse_flash_attention_template_tiling_key.h
  * \brief
  */
 
-#ifndef TQC_SPARSE_FLASH_ATTENTION_TEMPLATE_TILING_KEY_H
-#define TQC_SPARSE_FLASH_ATTENTION_TEMPLATE_TILING_KEY_H
+#ifndef TURBOQUANT_SPARSE_FLASH_ATTENTION_TEMPLATE_TILING_KEY_H
+#define TURBOQUANT_SPARSE_FLASH_ATTENTION_TEMPLATE_TILING_KEY_H
 
 #include "ascendc/host_api/tiling/template_argument.h"
 
@@ -38,7 +38,7 @@ ASCENDC_TPL_UINT_DECL(TEMPLATE_MODE, ASCENDC_TPL_4_BW, ASCENDC_TPL_UI_LIST, C_TE
 ASCENDC_TPL_BOOL_DECL(IS_SPLIT_G, 0, 1),
 );
 
-// 支持的模板参数组�?// 用于调用GET_TPL_TILING_KEY获取TilingKey时，接口内部校验TilingKey是否合法
+// 支持的模板参数组�?// 用于调用GET_TPL_TILING_KEY获取TilingKey时，接口内部校验TilingKey是否合法
 ASCENDC_TPL_SEL(
     ASCENDC_TPL_ARGS_SEL(
     ASCENDC_TPL_BOOL_SEL(FLASH_DECODE, 0),

@@ -9,7 +9,7 @@
  */
 
 /*!
- * \file tqc_sparse_flash_attention_infershape.cpp
+ * \file turboquant_sparse_flash_attention_infershape.cpp
  * \brief
  */
 
@@ -30,7 +30,7 @@ constexpr uint32_t DIM_INDEX_3 = 3;
 constexpr uint32_t DIM_NUM_3 = 3;
 constexpr uint32_t DIM_NUM_4 = 4;
 
-ge::graphStatus InferShapeTqcSparseFlashAttention(gert::InferShapeContext *context)
+ge::graphStatus InferShapeTurboQuantSparseFlashAttention(gert::InferShapeContext *context)
 {
     OP_CHECK_IF(context == nullptr, OP_LOGE_WITH_INVALID_INPUT("TurboQuantSparseFlashAttention", "InferShapeContext"),
                return ge::GRAPH_FAILED);
@@ -65,7 +65,7 @@ ge::graphStatus InferShapeTqcSparseFlashAttention(gert::InferShapeContext *conte
     return GRAPH_SUCCESS;
 }
 
-ge::graphStatus InferDataTypeTqcSparseFlashAttention(gert::InferDataTypeContext *context)
+ge::graphStatus InferDataTypeTurboQuantSparseFlashAttention(gert::InferDataTypeContext *context)
 {
     OP_CHECK_IF(context == nullptr, OP_LOGE_WITH_INVALID_INPUT("TurboQuantSparseFlashAttention", "InferShapeContext"),
                return ge::GRAPH_FAILED);
@@ -75,7 +75,7 @@ ge::graphStatus InferDataTypeTqcSparseFlashAttention(gert::InferDataTypeContext 
 }
 
 IMPL_OP_INFERSHAPE(TurboQuantSparseFlashAttention)
-    .InferShape(InferShapeTqcSparseFlashAttention)
-    .InferDataType(InferDataTypeTqcSparseFlashAttention);
+    .InferShape(InferShapeTurboQuantSparseFlashAttention)
+    .InferDataType(InferDataTypeTurboQuantSparseFlashAttention);
 } // namespace ops
   

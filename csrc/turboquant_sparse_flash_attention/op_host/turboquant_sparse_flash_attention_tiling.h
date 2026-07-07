@@ -9,11 +9,11 @@
  */
 
 /*!
- * \file tqc_sparse_flash_attention_tiling.h
+ * \file turboquant_sparse_flash_attention_tiling.h
  * \brief
  */
-#ifndef TQC_SPARSE_FLASH_ATTENTION_TILING_H
-#define TQC_SPARSE_FLASH_ATTENTION_TILING_H
+#ifndef TURBOQUANT_SPARSE_FLASH_ATTENTION_TILING_H
+#define TURBOQUANT_SPARSE_FLASH_ATTENTION_TILING_H
 
 #include <sstream>
 #include <graph/utils/type_utils.h>
@@ -96,7 +96,7 @@ enum class QSFAAxis : uint32_t {
     S = 1,
     N = 2,
     D = 3,
-    K = 3,  // sparse_indices的K和key的D枚举值相同，表达相同位置, 最后一�?
+    K = 3,  // sparse_indices的K和key的D枚举值相同，表达相同位置, 最后一�?
     T = 5,
     Bn = 6, // block number
     Bs = 7, // block size
@@ -112,7 +112,7 @@ struct QSFAOptionalParaInfo {
     const gert::Tensor *tensor;
 };
 
-// -----------算子Tiling入参结构体定�?--------------
+// -----------算子Tiling入参结构体定�?--------------
 struct QSFAParaInfo {
     QSFARequiredParaInfo query = {nullptr, nullptr};
     QSFARequiredParaInfo key = {nullptr, nullptr};
@@ -150,7 +150,7 @@ struct InnerSplitParams {
 };
 
 // -----------算子TilingData定义---------------
-BEGIN_TILING_DATA_DEF(TqcSparseFlashAttentionBaseParamsMla)
+BEGIN_TILING_DATA_DEF(TurboQuantSparseFlashAttentionBaseParamsMla)
 TILING_DATA_FIELD_DEF(uint32_t, batchSize)
 TILING_DATA_FIELD_DEF(uint32_t, seqSize)
 TILING_DATA_FIELD_DEF(uint32_t, qSeqSize)
@@ -174,45 +174,45 @@ TILING_DATA_FIELD_DEF(uint32_t, isActualLenDimsNull)
 TILING_DATA_FIELD_DEF(uint32_t, isActualLenDimsKVNull)
 END_TILING_DATA_DEF
 
-REGISTER_TILING_DATA_CLASS(TqcSparseFlashAttentionBaseParamsMlaOp, TqcSparseFlashAttentionBaseParamsMla)
+REGISTER_TILING_DATA_CLASS(TurboQuantSparseFlashAttentionBaseParamsMlaOp, TurboQuantSparseFlashAttentionBaseParamsMla)
 
-BEGIN_TILING_DATA_DEF(TqcSparseFlashAttentionSingleCoreParamsMla)
+BEGIN_TILING_DATA_DEF(TurboQuantSparseFlashAttentionSingleCoreParamsMla)
 TILING_DATA_FIELD_DEF(uint32_t, usedCoreNum);
 END_TILING_DATA_DEF
-REGISTER_TILING_DATA_CLASS(TqcSparseFlashAttentionSingleCoreParamsMlaOp,
-    TqcSparseFlashAttentionSingleCoreParamsMla)
+REGISTER_TILING_DATA_CLASS(TurboQuantSparseFlashAttentionSingleCoreParamsMlaOp,
+    TurboQuantSparseFlashAttentionSingleCoreParamsMla)
 
-BEGIN_TILING_DATA_DEF(TqcSparseFlashAttentionSingleCoreTensorSizeMla)
+BEGIN_TILING_DATA_DEF(TurboQuantSparseFlashAttentionSingleCoreTensorSizeMla)
 TILING_DATA_FIELD_DEF(uint32_t, mmResUbSize);
 TILING_DATA_FIELD_DEF(uint32_t, bmm2ResUbSize);
 END_TILING_DATA_DEF
-REGISTER_TILING_DATA_CLASS(TqcSparseFlashAttentionSingleCoreTensorSizeMlaOp,
-    TqcSparseFlashAttentionSingleCoreTensorSizeMla)
+REGISTER_TILING_DATA_CLASS(TurboQuantSparseFlashAttentionSingleCoreTensorSizeMlaOp,
+    TurboQuantSparseFlashAttentionSingleCoreTensorSizeMla)
 
-BEGIN_TILING_DATA_DEF(TqcSparseFlashAttentionSplitKVParamsMla)
+BEGIN_TILING_DATA_DEF(TurboQuantSparseFlashAttentionSplitKVParamsMla)
 TILING_DATA_FIELD_DEF(uint32_t, s2)             // S2切分份数
 TILING_DATA_FIELD_DEF(uint32_t, accumOutSize)   // FD workspace
 TILING_DATA_FIELD_DEF(uint32_t, logSumExpSize)  // FD workspace
 END_TILING_DATA_DEF
-REGISTER_TILING_DATA_CLASS(TqcSparseFlashAttentionSplitKVParamsMlaOp,
-    TqcSparseFlashAttentionSplitKVParamsMla)
+REGISTER_TILING_DATA_CLASS(TurboQuantSparseFlashAttentionSplitKVParamsMlaOp,
+    TurboQuantSparseFlashAttentionSplitKVParamsMla)
 
-// 内切基本块参�?
-BEGIN_TILING_DATA_DEF(TqcSparseFlashAttentionInnerSplitParams)
+// 内切基本块参�?
+BEGIN_TILING_DATA_DEF(TurboQuantSparseFlashAttentionInnerSplitParams)
 TILING_DATA_FIELD_DEF(uint32_t, mBaseSize)
 TILING_DATA_FIELD_DEF(uint32_t, s2BaseSize)
 END_TILING_DATA_DEF
-REGISTER_TILING_DATA_CLASS(TqcSparseFlashAttentionInnerSplitParamsOp,
-    TqcSparseFlashAttentionInnerSplitParams)
+REGISTER_TILING_DATA_CLASS(TurboQuantSparseFlashAttentionInnerSplitParamsOp,
+    TurboQuantSparseFlashAttentionInnerSplitParams)
 
-BEGIN_TILING_DATA_DEF(TqcSparseFlashAttentionTilingDataMla)
-TILING_DATA_FIELD_DEF_STRUCT(TqcSparseFlashAttentionBaseParamsMla, baseParams);
-TILING_DATA_FIELD_DEF_STRUCT(TqcSparseFlashAttentionSplitKVParamsMla, splitKVParams);
-TILING_DATA_FIELD_DEF_STRUCT(TqcSparseFlashAttentionSingleCoreParamsMla, singleCoreParams);
-TILING_DATA_FIELD_DEF_STRUCT(TqcSparseFlashAttentionSingleCoreTensorSizeMla, singleCoreTensorSize);
-TILING_DATA_FIELD_DEF_STRUCT(TqcSparseFlashAttentionInnerSplitParams, innerSplitParams);
+BEGIN_TILING_DATA_DEF(TurboQuantSparseFlashAttentionTilingDataMla)
+TILING_DATA_FIELD_DEF_STRUCT(TurboQuantSparseFlashAttentionBaseParamsMla, baseParams);
+TILING_DATA_FIELD_DEF_STRUCT(TurboQuantSparseFlashAttentionSplitKVParamsMla, splitKVParams);
+TILING_DATA_FIELD_DEF_STRUCT(TurboQuantSparseFlashAttentionSingleCoreParamsMla, singleCoreParams);
+TILING_DATA_FIELD_DEF_STRUCT(TurboQuantSparseFlashAttentionSingleCoreTensorSizeMla, singleCoreTensorSize);
+TILING_DATA_FIELD_DEF_STRUCT(TurboQuantSparseFlashAttentionInnerSplitParams, innerSplitParams);
 END_TILING_DATA_DEF
-REGISTER_TILING_DATA_CLASS(TurboQuantSparseFlashAttention, TqcSparseFlashAttentionTilingDataMla)
+REGISTER_TILING_DATA_CLASS(TurboQuantSparseFlashAttention, TurboQuantSparseFlashAttentionTilingDataMla)
 
 template <typename T> inline T Align(T num, T rnd)
 {
@@ -224,7 +224,7 @@ std::string QSFATensorDesc2String(const gert::StorageShape *shape, const gert::C
 std::string QSFADebugTilingContext(const gert::TilingContext *context);
 std::string QSFALayoutToSerialString(QSFALayout layout);
 
-// -----------算子Tiling入参信息�?--------------
+// -----------算子Tiling入参信息�?--------------
 struct QSFATilingInfo {
     const char *opName = nullptr;
     fe::PlatFormInfos *platformInfo = nullptr;
@@ -242,8 +242,8 @@ struct QSFATilingInfo {
     uint32_t vHeadDim = 0;
     uint32_t gSize = 0;
     uint32_t ropeHeadDim = 0;
-    uint32_t qTSize = 0; // 仅TND时生�?
-    uint32_t kvTSize = 0; // 仅TND时生�?
+    uint32_t qTSize = 0; // 仅TND时生�?
+    uint32_t kvTSize = 0; // 仅TND时生�?
     float scaleValue = 0;
     uint32_t innerPrecise = 0;
     uint32_t l2CacheOffFlag = 0;
@@ -294,7 +294,7 @@ struct QSFATilingInfo {
     int64_t dSizeVInput = 0;
 };
 
-// ---------------算子Tiling�?--------------
+// ---------------算子Tiling�?--------------
 class QSFAMlaTiling {
 public:
     explicit QSFAMlaTiling(gert::TilingContext *context) : context_(context) {}
@@ -361,7 +361,7 @@ private:
     uint32_t aivNum_ = 0;
     size_t libapiSize_ = 0;
 
-    TqcSparseFlashAttentionTilingDataMla tilingData_;
+    TurboQuantSparseFlashAttentionTilingDataMla tilingData_;
     uint32_t blockDim_{0};
     uint64_t workspaceSize_{0};
     uint64_t tilingKey_{0};
@@ -373,7 +373,7 @@ private:
     QSFATilingInfo *qsfaInfo_ = nullptr;
 };
 
-// -----------算子Tiling入参信息解析及Check�?--------------
+// -----------算子Tiling入参信息解析及Check�?--------------
 class QSFATilingCheck {
 public:
     explicit QSFATilingCheck(const QSFATilingInfo &qsfaInfo) : qsfaInfo_(qsfaInfo) {};
@@ -467,8 +467,8 @@ private:
     uint32_t qHeadDim_ = 0;
     uint32_t kHeadDim_ = 0;
     uint32_t vHeadDim_ = 0;
-    uint32_t qTSize_ = 0; // 仅TND时生�?
-    uint32_t kvTSize_ = 0; // 仅TND时生�?
+    uint32_t qTSize_ = 0; // 仅TND时生�?
+    uint32_t kvTSize_ = 0; // 仅TND时生�?
     KvStorageMode kvStorageMode_ = KvStorageMode::BATCH_CONTINUOUS;
     uint32_t sparseBlockCount_ = 0;
     int64_t sparseBlockSize_ = 0;
@@ -571,8 +571,8 @@ public:
     uint32_t vHeadDim_ = 0;
     int32_t ropeHeadDim_ = 0;
     int64_t dSizeKV_ = 0;
-    uint32_t qTSize_ = 0; // 仅TND时生�?
-    uint32_t kvTSize_ = 0; // 仅TND时生�?
+    uint32_t qTSize_ = 0; // 仅TND时生�?
+    uint32_t kvTSize_ = 0; // 仅TND时生�?
     KvStorageMode kvStorageMode_ = KvStorageMode::BATCH_CONTINUOUS;
     uint32_t sparseBlockCount_ = 0;
 
@@ -605,4 +605,4 @@ public:
     gert::Shape sparseIndicesShape_{};
 };
 } // namespace optiling
-#endif // TQC_SPARSE_FLASH_ATTENTION_TILING_H
+#endif // TURBOQUANT_SPARSE_FLASH_ATTENTION_TILING_H
