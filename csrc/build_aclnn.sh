@@ -46,6 +46,7 @@ elif [[ "$SOC_VERSION" =~ ^ascend910_93 ]]; then
         "grouped_matmul_swiglu_quant_weight_nz_tensor_list"
         "lightning_indexer_vllm"
         "sparse_flash_attention"
+        "turboquant_sparse_flash_attention"
         "dispatch_ffn_combine"
         "dispatch_ffn_combine_bf16"
         "dispatch_gmm_combine_decode"
