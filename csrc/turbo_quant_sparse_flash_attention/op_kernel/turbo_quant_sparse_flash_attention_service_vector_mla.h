@@ -813,6 +813,23 @@ __aicore__ inline void QSFAVectorService<QSFAT>::CopyOutMrgeResult(int64_t mte2S
         // [TQ4] codebook dequant -> antiKvTensorAsB16 [dealRow,headDim] bf16
         Tq4DequantRows(srcTensor, antiKvTensorAsB16, dealRow);
         qsfaRopeByteOff = constInfo.headDim / 2;
+
+        DataCopyExtParams tq4DataCopyParams;
+        tq4DataCopyParams.blockCount = static_cast<uint16_t>(dealRow);
+        tq4DataCopyParams.blockLen = constInfo.headDim * sizeof(K_ROPE_T);
+        tq4DataCopyParams.srcStride = 0;
+        tq4DataCopyParams.dstStride = (constInfo.combineHeadDim - constInfo.headDim) * sizeof(K_ROPE_T);
+        uint64_t tq4GmBase = runInfo.loop % MERGE_CACHE_GM_BUF_NUM * mergeGmStride +
+            (s2GmStartOffset + mte3Size) * constInfo.combineHeadDim;
+        DataCopyPad(kvMergeGm_[tq4GmBase], antiKvTensorAsB16, tq4DataCopyParams);
+
+        LocalTensor<K_ROPE_T> tq4KRopeUb = srcTensor[qsfaRopeByteOff].template ReinterpretCast<K_ROPE_T>();
+        tq4DataCopyParams.blockLen = constInfo.headDimRope * sizeof(K_ROPE_T);
+        tq4DataCopyParams.srcStride = static_cast<uint32_t>(qsfaRopeRowStrideBlk) * BYTE_BLOCK -
+            constInfo.headDimRope * sizeof(K_ROPE_T);
+        tq4DataCopyParams.dstStride = (constInfo.combineHeadDim - constInfo.headDimRope) * sizeof(K_ROPE_T);
+        DataCopyPad(kvMergeGm_[tq4GmBase + constInfo.headDim], tq4KRopeUb, tq4DataCopyParams);
+        return;
     } else {
         LocalTensor<half> kvTensorAsFp16 = tmpBuff1.Get<half>();
         if (dealRow == 1) {
