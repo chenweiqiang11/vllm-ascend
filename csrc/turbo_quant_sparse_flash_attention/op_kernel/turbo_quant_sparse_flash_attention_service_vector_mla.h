@@ -806,43 +806,26 @@ __aicore__ inline void QSFAVectorService<QSFAT>::CopyOutMrgeResult(int64_t mte2S
         // [TQ4] codebook dequant -> antiKvTensorAsB16 [dealRow,headDim] bf16
         Tq4DequantRows(srcTensor, antiKvTensorAsB16, dealRow);
         qsfaRopeByteOff = constInfo.headDim / 2;
-    }
 
-    LocalTensor<K_ROPE_T> antiKvTensorAsB16Nz = outputBuff1.Get<K_ROPE_T>();
-    WaitFlag<AscendC::HardEvent::MTE3_V>(SYNC_OUTPUT_BUF1_FLAG);
-    int dataBlocks = REPEAT_BLOCK_BYTE / BYTE_BLOCK;
-    int loops = CeilDiv(dealRow, dataBlocks);
-    uint64_t tail = dealRow - (loops - 1) * dataBlocks;
-    uint64_t repeatElementNum = FP32_REPEAT_ELEMENT_NUM * 2;
-    uint64_t blockElementNum = FP32_BLOCK_ELEMENT_NUM * 2;
-    uint8_t repeatTimes = static_cast<uint8_t>(constInfo.headDim / blockElementNum);
-    for (int i = 0; i < loops; i++) {
-        mask = (i == loops - 1) ? tail * blockElementNum : repeatElementNum;
-        Copy(antiKvTensorAsB16Nz[i * repeatElementNum], antiKvTensorAsB16[i * dataBlocks * constInfo.headDim], mask,
-            repeatTimes, {1, 32, static_cast<uint16_t>(dealRow), 1});
-    }
-    SetFlag<AscendC::HardEvent::V_MTE3>(SYNC_OUTPUT_BUF1_FLAG);
-    WaitFlag<AscendC::HardEvent::V_MTE3>(SYNC_OUTPUT_BUF1_FLAG);
-    DataCopyExtParams dataCopyParams;
-    dataCopyParams.blockCount = constInfo.headDim / blockElementNum;
-    dataCopyParams.blockLen = dealRow * blockElementNum * sizeof(K_ROPE_T);
-    dataCopyParams.srcStride = 0;
-    dataCopyParams.dstStride = (constInfo.s2BaseSize - dealRow) * blockElementNum * sizeof(K_ROPE_T);
-    DataCopyPad(kvMergeGm_[runInfo.loop % MERGE_CACHE_GM_BUF_NUM * mergeGmStride + (s2GmStartOffset + mte3Size) *
-        blockElementNum], antiKvTensorAsB16Nz, dataCopyParams);
-    SetFlag<AscendC::HardEvent::MTE3_V>(SYNC_OUTPUT_BUF1_FLAG);
+        DataCopyExtParams tq4DataCopyParams;
+        tq4DataCopyParams.blockCount = static_cast<uint16_t>(dealRow);
+        tq4DataCopyParams.blockLen = constInfo.headDim * sizeof(K_ROPE_T);
+        tq4DataCopyParams.srcStride = 0;
+        tq4DataCopyParams.dstStride = (constInfo.combineHeadDim - constInfo.headDim) * sizeof(K_ROPE_T);
+        uint64_t tq4GmBase = runInfo.loop % MERGE_CACHE_GM_BUF_NUM * mergeGmStride +
+            (s2GmStartOffset + mte3Size) * constInfo.combineHeadDim;
+        DataCopyPad(kvMergeGm_[tq4GmBase], antiKvTensorAsB16, tq4DataCopyParams);
 
-    LocalTensor<K_ROPE_T> kRopeUb = srcTensor[qsfaRopeByteOff].template ReinterpretCast<K_ROPE_T>();
-    LocalTensor<K_ROPE_T> kRopeUbNz = outputBuff2.Get<K_ROPE_T>();
-    WaitFlag<AscendC::HardEvent::MTE3_V>(SYNC_OUTPUT_BUF2_FLAG);
-    Copy(kRopeUbNz, kRopeUb, constInfo.headDimRope, static_cast<uint8_t>(dealRow), {static_cast<uint16_t>(dealRow), 1,
-        1, qsfaRopeRowStrideBlk});
-    SetFlag<AscendC::HardEvent::V_MTE3>(SYNC_OUTPUT_BUF2_FLAG);
-    WaitFlag<AscendC::HardEvent::V_MTE3>(SYNC_OUTPUT_BUF2_FLAG);
-    dataCopyParams.blockCount = constInfo.headDimRope / blockElementNum;
-    DataCopyPad(kvMergeGm_[runInfo.loop % MERGE_CACHE_GM_BUF_NUM * mergeGmStride + 512 * constInfo.headDim +
-        (s2GmStartOffset + mte3Size) * blockElementNum], kRopeUbNz, dataCopyParams);
-    SetFlag<AscendC::HardEvent::MTE3_V>(SYNC_OUTPUT_BUF2_FLAG);
+        LocalTensor<K_ROPE_T> tq4KRopeUb = srcTensor[qsfaRopeByteOff].template ReinterpretCast<K_ROPE_T>();
+        tq4DataCopyParams.blockLen = constInfo.headDimRope * sizeof(K_ROPE_T);
+        // DataCopyPad UB-side srcStride is in 32B datablocks, not bytes (cf. sparse_flash_attention
+        // CopyOutMrgeResult). The rope row pitch is qsfaRopeRowStrideBlk blocks; subtract blockLen's blocks.
+        tq4DataCopyParams.srcStride = static_cast<uint32_t>(qsfaRopeRowStrideBlk) -
+            constInfo.headDimRope * sizeof(K_ROPE_T) / BYTE_BLOCK;
+        tq4DataCopyParams.dstStride = (constInfo.combineHeadDim - constInfo.headDimRope) * sizeof(K_ROPE_T);
+        DataCopyPad(kvMergeGm_[tq4GmBase + constInfo.headDim], tq4KRopeUb, tq4DataCopyParams);
+        return;
+    }
 }
 
 // b s1 k
