@@ -263,30 +263,18 @@ def _kernel_call(kv, bt, cent, sl, kout, head_dim=HEAD_DIM):
 
 @torch.no_grad()
 def compress_kernel(latent, head_dim=None):
-    """Fused compress via aclnnTqCompressLatent. latent [N,head_dim] (rmsnorm'd, fp16/bf16) ->
-    (slot uint8 [N,base_slot_size(head_dim)], ws_t). Hadamard (1 matmul) in torch; norm/quantize/pack in kernel.
-    Replaces the ~18-op torch compress with: 1 matmul + 1 kernel call."""
-    _init_aclnn()
+    """Fused compress via torch op tq_compress_latent. latent [N,head_dim] (rmsnorm'd, fp16/bf16) ->
+    (slot uint8 [N,base_slot_size(head_dim)], z). Hadamard (1 matmul) in torch; norm/quantize/pack in the
+    csrc kernel (aclnnTqCompressLatent). Replaces the ~18-op torch compress with: 1 matmul + 1 op call."""
     _require_npu()
     head_dim = int(latent.shape[-1] if head_dim is None else head_dim)
     _check_head_dim(head_dim)
     _build(latent.device, head_dim)
     dev = latent.device
-    N = latent.shape[0]
     z = (latent.float() @ _PIT.to(dev)).contiguous()        # Hadamard (un-normalized), fp32
     cent = _CENT.to(dev).contiguous()
-    slot = torch.empty(N, base_slot_size(head_dim), dtype=torch.uint8, device=dev)
-    a = [_t2a(z), _t2a(cent), _t2a(slot)]
-    ws = _ct.c_uint64(0); exe = _ct.c_void_p()
-    r = _libcust.aclnnTqCompressLatentGetWorkspaceSize(a[0], a[1], a[2], _ct.byref(ws), _ct.byref(exe))
-    assert r == 0, f"CompressGetWorkspaceSize ret={r}"
-    ws_t = torch.empty(int(ws.value) if ws.value > 0 else 1, dtype=torch.uint8, device=dev)
-    stream = _ct.c_void_p(torch_npu.npu.current_stream().npu_stream)
-    r = _libcust.aclnnTqCompressLatent(_ct.c_void_p(ws_t.data_ptr()), ws.value, exe, stream)
-    assert r == 0, f"CompressExecute ret={r}"
-    for x in a:
-        _libnn.aclDestroyTensor(x)
-    return slot, (ws_t, z)   # hold ws_t + z alive until caller scatters
+    slot = torch.ops._C_ascend.tq_compress_latent(z, cent)  # [N,320] uint8, fused norm+quantize+pack
+    return slot, (z,)   # hold z alive until caller scatters (matches prior tuple shape)
 
 
 @torch.no_grad()

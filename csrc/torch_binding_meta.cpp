@@ -269,6 +269,14 @@ at::Tensor turboquant_sparse_flash_attention_meta(
     return output;
 }
 
+at::Tensor tq_compress_latent_meta(
+    const at::Tensor &latent, const at::Tensor &centroids)
+{
+    // SLOT_PAD=320 hardcoded (GLM-5.1 kv_lora_rank=512); matches op infershape.
+    at::Tensor slot = at::empty({latent.size(0), 320}, latent.options().dtype(at::kByte));
+    return slot;
+}
+
 std::tuple<at::Tensor, at::Tensor> matmul_allreduce_add_rmsnorm_meta(
     const at::Tensor &x1,
     const at::Tensor &x2,
@@ -620,6 +628,8 @@ TORCH_LIBRARY_IMPL_EXPAND(CONCAT(_C, _ascend), Meta, ops) {
     ops.impl("npu_sparse_flash_attention", &vllm_ascend::meta::npu_sparse_flash_attention_meta);
     // TurboQuant sparse flash attention
     ops.impl("turboquant_sparse_flash_attention", &vllm_ascend::meta::turboquant_sparse_flash_attention_meta);
+    // TurboQuant compress (latent -> TQ4 slot)
+    ops.impl("tq_compress_latent", &vllm_ascend::meta::tq_compress_latent_meta);
     // MoE dispatch-ffn-combine
     ops.impl("dispatch_ffn_combine", &vllm_ascend::meta::dispatch_ffn_combine_meta);
     // matmul allreduce add rmsnorm

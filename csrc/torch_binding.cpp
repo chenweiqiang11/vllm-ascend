@@ -43,6 +43,7 @@
 #include "moe_init_routing_custom/moe_init_routing_custom_torch_adpt.h"
 #include "sparse_flash_attention/sparse_flash_attention_torch_adpt.h"
 #include "turbo_quant_sparse_flash_attention/turbo_quant_sparse_flash_attention_torch_adpt.h"
+#include "tq_compress_latent/tq_compress_latent_torch_adpt.h"
 #include "lightning_indexer_quant/lightning_indexer_quant_torch_adpt.h"
 #include <c10/core/Device.h>
 #include <c10/util/Exception.h>
@@ -819,6 +820,13 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
     ops.impl("turboquant_sparse_flash_attention",
              torch::kPrivateUse1,
              &vllm_ascend::turboquant_sparse_flash_attention);
+
+    ops.def(
+        "tq_compress_latent(Tensor latent, Tensor centroids) -> Tensor"
+    );
+    ops.impl("tq_compress_latent",
+             torch::kPrivateUse1,
+             &vllm_ascend::tq_compress_latent);
 
     ops.def(
         "dispatch_ffn_combine(Tensor x, Tensor[] weight1, Tensor[] weight2, Tensor expert_idx,"
