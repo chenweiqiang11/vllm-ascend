@@ -1,9 +1,26 @@
+# TQ_RW_PATCHED
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeVar
 
 import scipy  # type: ignore
+import os
 import torch
 import torch_npu
+
+
+def _tq_store():
+    from vllm_ascend.turboquant import tq_latent_store as _tls
+    return _tls
+
+
+def _tq_packed_bytes(kv_lora_rank: int) -> int:
+    return kv_lora_rank // 2
+
+
+
+
+def _tq_fused_slot_bytes(kv_lora_rank: int, qk_rope_head_dim: int) -> int:
+    return _tq_packed_bytes(kv_lora_rank) + qk_rope_head_dim * 2 + 2
 import vllm.envs as envs_vllm
 from torch import nn
 from vllm.config import VllmConfig, get_current_vllm_config
@@ -415,6 +432,10 @@ class AscendSFAImpl(MLAAttentionImpl):
 
         self.local_num_heads = self.num_heads
         self.vllm_config = get_current_vllm_config()
+        _additional_config = self.vllm_config.additional_config or {}
+        self.tq_key_quant_mode = int(_additional_config.get("tq_key_quant_mode", 3))
+        self.tq_value_quant_mode = int(_additional_config.get("tq_value_quant_mode", self.tq_key_quant_mode))
+        self.tq_tile_size = int(_additional_config.get("tq_tile_size", 128))
         self.is_kv_producer = (
             self.vllm_config.kv_transfer_config is not None and self.vllm_config.kv_transfer_config.is_kv_producer
         )
@@ -758,6 +779,26 @@ class AscendSFAImpl(MLAAttentionImpl):
         # npu_kv_rmsnorm_rope_cache needs [B, N, S, D]
         kv_no_split = kv_no_split.view(B, N, S, self.kv_lora_rank + self.qk_rope_head_dim)
         cache_mode = "PA"
+        if kv_cache[0].dtype == torch.int8:  # TQ 4-bit latent storage
+            _tls = _tq_store()
+            _kvc = kv_no_split[..., : self.kv_lora_rank].reshape(-1, self.kv_lora_rank)
+            _kpe = kv_no_split[..., self.kv_lora_rank :]
+            _kvc_n = torch_npu.npu_rms_norm(_kvc, self.kv_a_layernorm.weight, self.kv_a_layernorm.variance_epsilon)[0]
+            _slot8, _wsc = _tls.compress_kernel(_kvc_n, head_dim=self.kv_lora_rank)
+            _slot = _slot8.view(torch.int8)
+            _kpe_r = torch_npu.npu_interleave_rope(_kpe, cos, sin).reshape(-1, self.qk_rope_head_dim)
+            _packed = _tq_packed_bytes(self.kv_lora_rank)
+            _rope_bytes = self.qk_rope_head_dim * 2
+            _nib = _slot[:, :_packed]; _vn = _slot[:, _packed:_packed + 2]
+            _ts2 = _tq_store()
+            _lutsq = _ts2.lutsq(_nib.device, head_dim=self.kv_lora_rank)  # graph-safe gather+sum
+            _inv = torch.rsqrt(_lutsq[_nib.long()].sum(-1, keepdim=True) + 1e-16)
+            _vnf = _vn.contiguous().view(torch.float16).float().view(-1, 1)
+            _sc = (_vnf * _inv).to(torch.float16).view(torch.uint8).view(-1, 2)
+            _rb = _kpe_r.to(torch.bfloat16).contiguous().view(torch.uint8).view(-1, _rope_bytes).view(torch.int8)
+            _comb = torch.cat([_nib.view(torch.int8), _rb.view(torch.int8), _sc.view(torch.int8)], dim=-1)
+            torch_npu.npu_scatter_nd_update_(kv_cache[0].view(-1, _comb.shape[-1]), slots.view(-1, 1), _comb.view(-1, _comb.shape[-1]))
+            return None, None
 
         if self.enable_dsa_cp:
             _, _, k_pe, k_nope = torch_npu.npu_kv_rmsnorm_rope_cache(
@@ -1012,7 +1053,16 @@ class AscendSFAImpl(MLAAttentionImpl):
         block_table = attn_metadata.block_table
         kv = kv_cache[0]
         key_rope = kv_cache[1]
-
+        if kv.dtype == torch.int8:  # TQ4 4-bit latent: fused csrc op reads int8 directly (no dequant roundtrip)
+            _ts = _tq_store()
+            _q = torch.cat([_ts.had_fwd(ql_nope, head_dim=self.kv_lora_rank), q_pe], dim=-1).contiguous()
+            _ao = torch.ops._C_ascend.turboquant_sparse_flash_attention(
+                _q, kv, kv, topk_indices, None, None, block_table,
+                actual_seq_lengths_query, actual_seq_lengths_key,
+                float(self.scale), self.tq_key_quant_mode, self.tq_value_quant_mode, 1, "TND", "PA_BSND",
+                3, 9223372036854775807, 9223372036854775807, 2, 1, self.tq_tile_size,
+                self.qk_rope_head_dim)
+            return _ts.had_inv(_ao, head_dim=self.kv_lora_rank)
         attn_output = torch.ops._C_ascend.npu_sparse_flash_attention(
             query=ql_nope,
             key=kv,
@@ -1261,3 +1311,4 @@ class AscendSFAImpl(MLAAttentionImpl):
         maybe_save_kv_layer_to_connector(layer_name, list(kv_cache))
 
         return output_padded
+

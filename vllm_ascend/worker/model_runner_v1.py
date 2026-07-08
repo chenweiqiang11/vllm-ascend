@@ -292,6 +292,7 @@ class NPUModelRunner(GPUModelRunner):
         if self.use_sparse_c8_indexer:
             self.c8_k_cache_dtype = torch.int8
             self.c8_k_scale_cache_dtype = torch.float16
+        self.use_tq_latent = self.ascend_config.enable_tq_latent
 
         self.attn_backend = get_attn_backend(
             0,
@@ -2925,7 +2926,15 @@ class NPUModelRunner(GPUModelRunner):
                         k_cache_dtype, v_cache_dtype = self.vllm_config.quant_config.get_kv_quant_dtype(
                             layer_name, current_kv_cache_spec.dtype, self.model_config
                         )
-                    k_cache = raw_k_tensor.view(k_cache_dtype).view(k_shape)
+                    if getattr(self, "use_tq_latent", False):
+                        _tb, _tbs, _th = k_shape[0], k_shape[1], k_shape[2]
+                        _kv_lora_rank, _rope_dim = current_kv_cache_spec.sparse_head_dim[:2]
+                        _packed = _kv_lora_rank // 2
+                        _scale_bytes = get_dtype_size(torch.float16)
+                        _slot = _packed + _rope_dim * get_dtype_size(torch.bfloat16) + _scale_bytes
+                        k_cache = raw_k_tensor.view(torch.int8).view(_tb, _tbs, _th, _slot)
+                    else:
+                        k_cache = raw_k_tensor.view(k_cache_dtype).view(k_shape)
                     v_cache = raw_v_tensor.view(v_cache_dtype).view(v_shape)
 
                     if self.use_sparse:
@@ -3239,6 +3248,7 @@ class NPUModelRunner(GPUModelRunner):
                         dtype=self.kv_cache_dtype,
                         cache_dtype_str=self.vllm_config.cache_config.cache_dtype,
                         cache_sparse_c8=self.use_sparse_c8_indexer,
+                        cache_tq_latent=self.use_tq_latent,
                     )
                 elif spec := attn_module.get_kv_cache_spec(self.vllm_config):
                     assert isinstance(spec, MLAAttentionSpec)
