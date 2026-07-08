@@ -21,6 +21,7 @@
 #include <acl/acl_base.h>
 #include <c10/util/Exception.h>
 #include <dlfcn.h>
+#include <cstdlib>
 #include <functional>
 #include <type_traits>
 #include <vector>
@@ -151,6 +152,16 @@ inline void *GetOpApiFuncAddr(const char *apiName) {
       return funcAddr;
     }
   }
+
+  static auto extraHandler = []() -> void* {
+    const char* p = getenv("VLLM_ASCEND_EXTRA_OPAPI_LIBS");
+    return dlopen((p && *p) ? p : "libtqc_opapi.so", RTLD_LAZY | RTLD_GLOBAL);
+  }();
+  if (extraHandler != nullptr) {
+    auto a2 = dlsym(extraHandler, apiName);
+    if (a2 != nullptr) { return a2; }
+  }
+  { auto a3 = dlsym(RTLD_DEFAULT, apiName); if (a3 != nullptr) { return a3; } }
 
   static auto opApiHandler = GetOpApiLibHandler(GetOpApiLibName());
   if (opApiHandler == nullptr) {
