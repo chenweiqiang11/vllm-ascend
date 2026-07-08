@@ -1078,29 +1078,6 @@ class AscendSFAImpl(MLAAttentionImpl):
                     3, 9223372036854775807, 9223372036854775807, 2, 1, self.tq_tile_size,
                     self.qk_rope_head_dim)
                 return _ts.had_inv(_ao, head_dim=self.kv_lora_rank)
-            if ql_nope.shape[0] == block_table.shape[0]:  # DECODE (1 q-tok/req, any batch B) -> vendor fused op
-                _q = torch.cat([_ts.had_fwd(ql_nope, head_dim=self.kv_lora_rank), q_pe], dim=-1).contiguous()
-                _ao = torch_npu.npu_kv_quant_sparse_flash_attention(
-                    _q, kv, kv, topk_indices, float(self.scale), self.tq_key_quant_mode, self.tq_value_quant_mode,
-                    block_table=block_table,
-                    actual_seq_lengths_query=actual_seq_lengths_query,
-                    actual_seq_lengths_kv=actual_seq_lengths_key,
-                    sparse_block_size=1, layout_query="TND", layout_kv="PA_BSND",
-                    sparse_mode=3, attention_mode=2, quant_scale_repo_mode=1,
-                    tile_size=self.tq_tile_size, rope_head_dim=self.qk_rope_head_dim)
-                return _ts.had_inv(_ao, head_dim=self.kv_lora_rank)
-            else:  # PREFILL -> dequant combined TQ4 slot + old SFA (fused kernel dense-prefill bug >1024 ctx)
-                from vllm_ascend.turboquant import tq_prefill_fallback as _fb
-                _kvd, _rope_c, _bt_c = _fb.dequant_combined_386(
-                    kv, block_table, ql_nope.dtype, head_dim=self.kv_lora_rank,
-                    rope_head_dim=self.qk_rope_head_dim)
-                _qh = _ts.had_fwd(ql_nope, head_dim=self.kv_lora_rank)
-                _ao = torch.ops._C_ascend.npu_sparse_flash_attention(
-                    query=_qh, key=_kvd, value=_kvd, sparse_indices=topk_indices, scale_value=float(self.scale),
-                    sparse_block_size=1, block_table=_bt_c,
-                    actual_seq_lengths_query=actual_seq_lengths_query, actual_seq_lengths_kv=actual_seq_lengths_key,
-                    query_rope=q_pe, key_rope=_rope_c, layout_query="TND", layout_kv="PA_BSND", sparse_mode=3)
-                return _ts.had_inv(_ao, head_dim=self.kv_lora_rank)
         if kv.dtype == torch.int8:  # TQ 4-bit latent: dequant + compact rope+bt for SFA
             _ts = _tq_store()
             if os.environ.get("TQ_KERNEL"):
