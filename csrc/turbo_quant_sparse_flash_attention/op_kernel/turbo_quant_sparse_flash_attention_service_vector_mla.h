@@ -712,10 +712,7 @@ QSFAVectorService<QSFAT>::CopyInSingleKv(int64_t &mte2Size, int64_t mte3Size, in
     // 当前仅支持COMBINE模式
     if (constInfo.quantScaleRepoMode == QUANT_SCALE_REPO_MODE::COMBINE) {
         // [TQ4] slot = headDim/2 int4 nope + headDimRope*sizeof(K_ROPE_T) + 2B vecNorm(fp16)
-        uint32_t combineBytes = (constInfo.keyQuantMode == QUANT_MODE::TQ4)
-            ? (constInfo.headDim / 2 + constInfo.headDimRope * sizeof(K_ROPE_T) + sizeof(half))
-            : (constInfo.headDim * sizeof(KV_T) + constInfo.headDimRope * sizeof(K_ROPE_T) +
-               constInfo.headDim / constInfo.tileSize * sizeof(T));
+        uint32_t combineBytes = constInfo.headDim / 2 + constInfo.headDimRope * sizeof(K_ROPE_T) + sizeof(half);
         intriParams.blockLen = combineBytes;
         uint32_t combineDim = combineBytes / sizeof(KV_T);
         uint32_t combineDimAlign = CeilAlign(combineBytes, ConstInfo::BUFFER_SIZE_BYTE_32B) / sizeof(KV_T);
@@ -749,11 +746,7 @@ __aicore__ inline void QSFAVectorService<QSFAT>::CopyInKv(int64_t &mte2Size, int
         ((keyBNBOffset1 > keyBNBOffset2 ? (keyBNBOffset1 - keyBNBOffset2) :
         (keyBNBOffset2 - keyBNBOffset1)) - constInfo.sparseBlockSize);
     // [TQ4] slot = headDim/2 int4 nope + headDimRope*sizeof(K_ROPE_T) + 2B vecNorm(fp16)
-    uint32_t combineBytes = (constInfo.keyQuantMode == QUANT_MODE::TQ4)
-        ? (constInfo.headDim / 2 + constInfo.headDimRope * sizeof(K_ROPE_T) + sizeof(half))
-        : (constInfo.headDim * sizeof(KV_T) +
-           constInfo.headDimRope * sizeof(K_ROPE_T) +
-           constInfo.headDim / constInfo.tileSize * sizeof(T));
+    uint32_t combineBytes = constInfo.headDim / 2 + constInfo.headDimRope * sizeof(K_ROPE_T) + sizeof(half);
     int64_t keySrcStride = sparseBlockSrcStride * combineBytes;
     if (unlikely(keySrcStride >= INT32_MAX || keySrcStride < 0 ||
         realS2Idx1 + constInfo.sparseBlockSize >= s2IdLimit ||
@@ -813,83 +806,6 @@ __aicore__ inline void QSFAVectorService<QSFAT>::CopyOutMrgeResult(int64_t mte2S
         // [TQ4] codebook dequant -> antiKvTensorAsB16 [dealRow,headDim] bf16
         Tq4DequantRows(srcTensor, antiKvTensorAsB16, dealRow);
         qsfaRopeByteOff = constInfo.headDim / 2;
-
-        DataCopyExtParams tq4DataCopyParams;
-        tq4DataCopyParams.blockCount = static_cast<uint16_t>(dealRow);
-        tq4DataCopyParams.blockLen = constInfo.headDim * sizeof(K_ROPE_T);
-        tq4DataCopyParams.srcStride = 0;
-        tq4DataCopyParams.dstStride = (constInfo.combineHeadDim - constInfo.headDim) * sizeof(K_ROPE_T);
-        uint64_t tq4GmBase = runInfo.loop % MERGE_CACHE_GM_BUF_NUM * mergeGmStride +
-            (s2GmStartOffset + mte3Size) * constInfo.combineHeadDim;
-        DataCopyPad(kvMergeGm_[tq4GmBase], antiKvTensorAsB16, tq4DataCopyParams);
-
-        LocalTensor<K_ROPE_T> tq4KRopeUb = srcTensor[qsfaRopeByteOff].template ReinterpretCast<K_ROPE_T>();
-        tq4DataCopyParams.blockLen = constInfo.headDimRope * sizeof(K_ROPE_T);
-        tq4DataCopyParams.srcStride = static_cast<uint32_t>(qsfaRopeRowStrideBlk) * BYTE_BLOCK -
-            constInfo.headDimRope * sizeof(K_ROPE_T);
-        tq4DataCopyParams.dstStride = (constInfo.combineHeadDim - constInfo.headDimRope) * sizeof(K_ROPE_T);
-        DataCopyPad(kvMergeGm_[tq4GmBase + constInfo.headDim], tq4KRopeUb, tq4DataCopyParams);
-        return;
-    } else {
-        LocalTensor<half> kvTensorAsFp16 = tmpBuff1.Get<half>();
-        if (dealRow == 1) {
-            Cast(kvTensorAsFp16, srcTensor, RoundMode::CAST_NONE, mask, 4, {1, 1, 8, 4});
-        } else {
-            uint8_t repeatTimes = static_cast<uint8_t>(dealRow);
-            Cast(kvTensorAsFp16, srcTensor, RoundMode::CAST_NONE, mask, repeatTimes, {1, 1, 32,
-                qsfaRopeRowStrideBlk});
-            Cast(kvTensorAsFp16[128], srcTensor[128], RoundMode::CAST_NONE, mask, repeatTimes, {1, 1, 32,
-                qsfaRopeRowStrideBlk});
-            Cast(kvTensorAsFp16[256], srcTensor[256], RoundMode::CAST_NONE, mask, repeatTimes, {1, 1, 32,
-                qsfaRopeRowStrideBlk});
-            Cast(kvTensorAsFp16[384], srcTensor[384], RoundMode::CAST_NONE, mask, repeatTimes, {1, 1, 32,
-                qsfaRopeRowStrideBlk});
-        }
-        PipeBarrier<PIPE_V>();
-        LocalTensor<T> antiQuantScale = tmpBuff2.Get<T>();
-        uint32_t scaleByteOff = constInfo.headDim * sizeof(KV_T) + constInfo.headDimRope * sizeof(K_ROPE_T);
-        LocalTensor<T> oriQuantScaleTensor = srcTensor[scaleByteOff].template ReinterpretCast<T>();
-        if (dealRow == 1) {
-            Brcb(antiQuantScale, oriQuantScaleTensor, 1, {1, 4});
-        } else {
-            DataCopyParams params;
-            params.blockCount = dealRow;
-            params.blockLen = 1;
-            params.dstStride = 0;
-            params.srcStride = (constInfo.headDim * sizeof(KV_T) + constInfo.headDimRope * sizeof(K_ROPE_T)) /
-                ConstInfo::BUFFER_SIZE_BYTE_32B;
-            LocalTensor<T> tmpAntiQuantScale = antiQuantScale[ConstInfo::BUFFER_SIZE_BYTE_1K];
-            DataCopy(tmpAntiQuantScale, oriQuantScaleTensor, params);
-            PipeBarrier<PIPE_V>();
-            Brcb(antiQuantScale, tmpAntiQuantScale, dealRow, {1, 4});
-        }
-        PipeBarrier<PIPE_V>();
-        uint32_t dealLoop = CeilDiv(dealRow, LIMIT_DEAL_ROW);
-        uint32_t dealRowFp32 = LIMIT_DEAL_ROW;
-        uint32_t element = LIMIT_DEAL_ROW * constInfo.headDim;
-        LocalTensor<T> kvTensorAsFp32 = inputBuff2.Get<T>();
-        for (uint32_t i = 0; i < dealLoop; i++) {
-            if (i == dealLoop - 1) {
-                dealRowFp32 = dealRow - i * LIMIT_DEAL_ROW;
-            }
-            Cast(kvTensorAsFp32, kvTensorAsFp16[i * element], RoundMode::CAST_NONE,
-                static_cast<uint32_t>(dealRowFp32 * constInfo.headDim));
-            PipeBarrier<PIPE_V>();
-            for (uint32_t j = 0; j < constInfo.tileSize / FP32_REPEAT_ELEMENT_NUM; j++) {
-                Mul(kvTensorAsFp32[j * FP32_REPEAT_ELEMENT_NUM], kvTensorAsFp32[j * FP32_REPEAT_ELEMENT_NUM],
-                    antiQuantScale[i * LIMIT_DEAL_ROW * 32],
-                    FP32_REPEAT_ELEMENT_NUM, 4 * dealRowFp32, {1, 1, 0, 16, 16, 1});
-            }
-            PipeBarrier<PIPE_V>();
-            if constexpr (IsSameType<K_ROPE_T, bfloat16_t>::value) { // bf16 采取四舍六入五成双模式
-                Cast(antiKvTensorAsB16[i * element], kvTensorAsFp32, RoundMode::CAST_RINT,
-                    static_cast<uint32_t>(dealRowFp32 * constInfo.headDim));
-            } else {
-                Cast(antiKvTensorAsB16[i * element], kvTensorAsFp32, RoundMode::CAST_ROUND,
-                    static_cast<uint32_t>(dealRowFp32 * constInfo.headDim));
-            }
-            PipeBarrier<PIPE_V>();
-        }
     }
 
     LocalTensor<K_ROPE_T> antiKvTensorAsB16Nz = outputBuff1.Get<K_ROPE_T>();

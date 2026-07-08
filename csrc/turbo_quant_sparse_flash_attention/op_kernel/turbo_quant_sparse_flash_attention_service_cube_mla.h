@@ -647,44 +647,28 @@ __aicore__ inline void QSFAMatmulService<QSFAT>::ComputeMm1(const RunInfo &info,
                 // 从k当中取当前的块
                 LocalTensor<K_ROPE_T> bL1Tensor = l1KVTensor[kb * L1_BLOCK_OFFSET];
                 if constexpr (TEMPLATE_MODE == V_TEMPLATE) {
-                    if (constInfo.keyQuantMode == QUANT_MODE::TQ4) {
-                        uint64_t kvMergeBase = info.loop % 4 * N_WORKSPACE_SIZE * kSize +
-                            nL1 * N_SPLIT_SIZE * kSize;
-                        if (kL1 == 0) {
-                            GlobalTensor<K_ROPE_T> kvMergeSrc = kvMergeGm_[kvMergeBase];
-                            DataCopyGmNDToL1<K_ROPE_T>(bL1Tensor, kvMergeSrc, nL1Size, nL1SizeAlign, 288, kSize);
-                        } else {
-                            GlobalTensor<K_ROPE_T> kvMergeSrc = kvMergeGm_[kvMergeBase + 288];
-                            DataCopyGmNDToL1<K_ROPE_T>(bL1Tensor, kvMergeSrc, nL1Size, nL1SizeAlign, 224, kSize);
-                            kvMergeSrc = kvMergeGm_[kvMergeBase + constInfo.headDim];
-                            LocalTensor<K_ROPE_T> ropeL1Tensor = bL1Tensor[224 * nL1SizeAlign];
-                            DataCopyGmNDToL1<K_ROPE_T>(ropeL1Tensor, kvMergeSrc, nL1Size, nL1SizeAlign,
-                                constInfo.headDimRope, kSize);
-                        }
+                    if (kL1 == 0) {
+                        DataCopyParams copyParams;
+                        copyParams.blockCount = 288 / BLOCK_ELEMENT_NUM;
+                        copyParams.blockLen = nL1Size;
+                        copyParams.srcStride = constInfo.s2BaseSize - nL1Size;
+                        copyParams.dstStride = nL1SizeAlign - nL1Size;
+                        DataCopy(bL1Tensor, kvMergeGm_[info.loop % 4 * N_WORKSPACE_SIZE * kSize +
+                                            nL1 * N_SPLIT_SIZE * BLOCK_ELEMENT_NUM], copyParams);
                     } else {
-                        if (kL1 == 0) {
-                            DataCopyParams copyParams;
-                            copyParams.blockCount = 288 / BLOCK_ELEMENT_NUM;
-                            copyParams.blockLen = nL1Size;
-                            copyParams.srcStride = constInfo.s2BaseSize - nL1Size;
-                            copyParams.dstStride = nL1SizeAlign - nL1Size;
-                            DataCopy(bL1Tensor, kvMergeGm_[info.loop % 4 * N_WORKSPACE_SIZE * kSize +
-                                                nL1 * N_SPLIT_SIZE * BLOCK_ELEMENT_NUM], copyParams);
-                        } else {
-                            DataCopyParams copyParams;
-                            copyParams.blockCount = 224 / BLOCK_ELEMENT_NUM;
-                            copyParams.blockLen = nL1Size;
-                            copyParams.srcStride = constInfo.s2BaseSize - nL1Size;
-                            copyParams.dstStride = nL1SizeAlign - nL1Size;
-                            DataCopy(bL1Tensor, kvMergeGm_[info.loop % 4 * N_WORKSPACE_SIZE * kSize +
-                                     288 * constInfo.s2BaseSize + nL1 * N_SPLIT_SIZE * BLOCK_ELEMENT_NUM], copyParams);
-                            copyParams.blockCount = constInfo.headDimRope / BLOCK_ELEMENT_NUM;
-                            DataCopy(
-                                bL1Tensor[224 * nL1SizeAlign],
-                                kvMergeGm_[info.loop % 4 * N_WORKSPACE_SIZE * kSize + N_WORKSPACE_SIZE * constInfo.headDim +
-                                            nL1 * N_SPLIT_SIZE * BLOCK_ELEMENT_NUM],
-                                copyParams);
-                        }
+                        DataCopyParams copyParams;
+                        copyParams.blockCount = 224 / BLOCK_ELEMENT_NUM;
+                        copyParams.blockLen = nL1Size;
+                        copyParams.srcStride = constInfo.s2BaseSize - nL1Size;
+                        copyParams.dstStride = nL1SizeAlign - nL1Size;
+                        DataCopy(bL1Tensor, kvMergeGm_[info.loop % 4 * N_WORKSPACE_SIZE * kSize +
+                                 288 * constInfo.s2BaseSize + nL1 * N_SPLIT_SIZE * BLOCK_ELEMENT_NUM], copyParams);
+                        copyParams.blockCount = constInfo.headDimRope / BLOCK_ELEMENT_NUM;
+                        DataCopy(
+                            bL1Tensor[224 * nL1SizeAlign],
+                            kvMergeGm_[info.loop % 4 * N_WORKSPACE_SIZE * kSize + N_WORKSPACE_SIZE * constInfo.headDim +
+                                        nL1 * N_SPLIT_SIZE * BLOCK_ELEMENT_NUM],
+                            copyParams);
                     }
                 }
                 SetFlag<HardEvent::MTE2_MTE1>(mte21KVIds[kb]);
@@ -801,23 +785,14 @@ __aicore__ inline void QSFAMatmulService<QSFAT>::ComputeMm2(const RunInfo &info,
                     kL0SizeAlign = QSFAAlign(kL0Size, 16U);
                 }
                 if constexpr (TEMPLATE_MODE == V_TEMPLATE) {
-                    if (constInfo.keyQuantMode == QUANT_MODE::TQ4) {
-                        uint64_t kvMergeOffset = info.loop % 4 * N_WORKSPACE_SIZE * 576 +
-                            qsfaKL1 * 128 * 576 + nL1 * N_SPLIT_SIZE;
-                        GlobalTensor<K_ROPE_T> kvMergeSrc = kvMergeGm_[kvMergeOffset];
-                        LocalTensor<K_ROPE_T> valueL1Tensor =
-                            bL1Tensor[(qsfaKL1 - qsfaKOffset) * 128 * N_SPLIT_SIZE];
-                        DataCopyGmNDToL1<K_ROPE_T>(valueL1Tensor, kvMergeSrc, kL0Size, kL0SizeAlign, nL1Size, 576);
-                    } else {
-                        DataCopyParams copyParams;
-                        copyParams.blockLen = kL0Size;
-                        copyParams.blockCount = nL1Size / BLOCK_ELEMENT_NUM;
-                        copyParams.srcStride = constInfo.s2BaseSize - kL0Size;
-                        copyParams.dstStride = kL0SizeAlign - kL0Size;
-                        DataCopy(bL1Tensor[(qsfaKL1 - qsfaKOffset) * 128 * N_SPLIT_SIZE], kvMergeGm_[info.loop % 4 *
-                            N_WORKSPACE_SIZE * 576 + qsfaKL1 * 128 * BLOCK_ELEMENT_NUM + nL1 * N_SPLIT_SIZE *
-                            constInfo.s2BaseSize], copyParams);
-                    }
+                    DataCopyParams copyParams;
+                    copyParams.blockLen = kL0Size;
+                    copyParams.blockCount = nL1Size / BLOCK_ELEMENT_NUM;
+                    copyParams.srcStride = constInfo.s2BaseSize - kL0Size;
+                    copyParams.dstStride = kL0SizeAlign - kL0Size;
+                    DataCopy(bL1Tensor[(qsfaKL1 - qsfaKOffset) * 128 * N_SPLIT_SIZE], kvMergeGm_[info.loop % 4 *
+                        N_WORKSPACE_SIZE * 576 + qsfaKL1 * 128 * BLOCK_ELEMENT_NUM + nL1 * N_SPLIT_SIZE *
+                        constInfo.s2BaseSize], copyParams);
                 }
             }
             SetFlag<HardEvent::MTE2_MTE1>(mte21KVIds[qsfaKb]);

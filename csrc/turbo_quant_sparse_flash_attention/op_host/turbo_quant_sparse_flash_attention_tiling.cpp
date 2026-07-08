@@ -1140,9 +1140,7 @@ ge::graphStatus QSFATilingCheck::CheckFeatureMlaAntiquantShapeSparseAndHeadDim()
 
     uint32_t kvLoraRank = qHeadDim_ - ropeHeadDim_;
     uint32_t tq4SlotBytes = kvLoraRank / 2 + ropeHeadDim_ * NUM_BYTES_BF16 + NUM_BYTES_FLOAT16;
-    uint32_t affineSlotBytes = kvLoraRank + ropeHeadDim_ * NUM_BYTES_BF16 +
-        kvLoraRank / static_cast<uint32_t>(tileSize_) * NUM_BYTES_FLOAT;
-    uint32_t expectedKHeadDim = (keyQuantMode_ == 3) ? tq4SlotBytes : affineSlotBytes;
+    uint32_t expectedKHeadDim = tq4SlotBytes;
     OP_CHECK_IF(kHeadDim_ != expectedKHeadDim,
         OP_LOGE_FOR_INVALID_VALUE_WITH_REASON(opName_, "kHeadDim_",
             std::to_string(kHeadDim_).c_str(), "k_head_dim does not match quant mode and MLA dimensions."),
@@ -1190,14 +1188,14 @@ ge::graphStatus QSFATilingCheck::CheckFeatureMlaAntiquantAttr() const
             std::to_string(attentionMode_).c_str(), "attention_mode should be 2(MLA-absorb)."),
         return ge::GRAPH_FAILED);
 
-    OP_CHECK_IF(keyQuantMode_ != 2 && keyQuantMode_ != 3, // 2:per-tile, 3:TQ4 codebook (Phase B)
+    OP_CHECK_IF(keyQuantMode_ != 3, // 3:TQ4 codebook (Phase B fused-in-SFA)
         OP_LOGE_FOR_INVALID_VALUE_WITH_REASON(opName_, "key_quant_mode",
-            std::to_string(keyQuantMode_).c_str(), "key_quant_mode should be 2(per-tile) or 3(TQ4)."),
+            std::to_string(keyQuantMode_).c_str(), "key_quant_mode should be 3(TQ4)."),
         return ge::GRAPH_FAILED);
 
-    OP_CHECK_IF(valueQuantMode_ != 2 && valueQuantMode_ != 3, // 2:per-tile, 3:TQ4 codebook (Phase B)
+    OP_CHECK_IF(valueQuantMode_ != 3, // 3:TQ4 codebook (Phase B fused-in-SFA)
         OP_LOGE_FOR_INVALID_VALUE_WITH_REASON(opName_, "value_quant_mode",
-            std::to_string(valueQuantMode_).c_str(), "value_quant_mode should be 2(per-tile) or 3(TQ4)."),
+            std::to_string(valueQuantMode_).c_str(), "value_quant_mode should be 3(TQ4)."),
         return ge::GRAPH_FAILED);
 
     OP_CHECK_IF(quantScaleRepoMode_ != 1, // 1:combine
@@ -1875,12 +1873,7 @@ void QSFAInfoParser::FillTilingInfoAttrsAndLayouts(QSFATilingInfo &qsfaInfo)
     uint32_t tileSize = static_cast<uint32_t>(qsfaInfo.tileSize);
     if (qHeadDim_ > qsfaInfo.ropeHeadDim && tileSize > 0) {
         uint32_t kvLoraRank = qHeadDim_ - qsfaInfo.ropeHeadDim;
-        if (qsfaInfo.keyQuantMode == 3) {
-            qsfaInfo.dSizeVInput = kvLoraRank / 2 + qsfaInfo.ropeHeadDim * NUM_BYTES_BF16 + NUM_BYTES_FLOAT16;
-        } else {
-            qsfaInfo.dSizeVInput = kvLoraRank + qsfaInfo.ropeHeadDim * NUM_BYTES_BF16 +
-                kvLoraRank / tileSize * NUM_BYTES_FLOAT;
-        }
+        qsfaInfo.dSizeVInput = kvLoraRank / 2 + qsfaInfo.ropeHeadDim * NUM_BYTES_BF16 + NUM_BYTES_FLOAT16;
     } else {
         qsfaInfo.dSizeVInput = dSizeKV_;
     }

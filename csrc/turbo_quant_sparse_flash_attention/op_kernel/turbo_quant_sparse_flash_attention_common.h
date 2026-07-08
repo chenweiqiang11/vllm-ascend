@@ -209,8 +209,8 @@ struct ConstInfo {
 
     // attention模式与量化模式
     ATTENTION_MODE attentionMode = ATTENTION_MODE::MLA_ABSORB;
-    QUANT_MODE keyQuantMode = QUANT_MODE::PER_TILE;
-    QUANT_MODE valueQuantMode = QUANT_MODE::PER_TILE;
+    QUANT_MODE keyQuantMode = QUANT_MODE::TQ4;
+    QUANT_MODE valueQuantMode = QUANT_MODE::TQ4;
     QUANT_SCALE_REPO_MODE quantScaleRepoMode = QUANT_SCALE_REPO_MODE::COMBINE;
     uint64_t tileSize = 128ULL;
 };
