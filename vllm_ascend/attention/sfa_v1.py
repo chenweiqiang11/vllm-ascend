@@ -1064,17 +1064,22 @@ class AscendSFAImpl(MLAAttentionImpl):
         key_rope = kv_cache[1]
         if kv.dtype == torch.int8 and os.environ.get("TQ_FUSED"):  # fused TQ4 dequant-in-SFA
             _ts = _tq_store()
-            if ql_nope.shape[0] == block_table.shape[0]:  # DECODE (1 q-tok/req, any batch B) -> fused op
+            if os.environ.get("TQ_CSRC"):
+                # csrc fused op handles BOTH decode (qSeqSize=1) and prefill (qSeqSize>1): TND query
+                # [T,gSize,D] carries qSeqSize in the T dim; per-token topk + sparseMode=3 causal masking
+                # are correct (validated single-op cos=0.935 == decode HW floor, full-attn + causal-active,
+                # up to T=256/skv=4096). No dequant roundtrip -> reads TQ4 cache directly.
                 _q = torch.cat([_ts.had_fwd(ql_nope, head_dim=self.kv_lora_rank), q_pe], dim=-1).contiguous()
-                if os.environ.get("TQ_CSRC"):
-                    _op = torch.ops._C_ascend.turboquant_sparse_flash_attention
-                    _ao = _op(
-                        _q, kv, kv, topk_indices, None, None, block_table,
-                        actual_seq_lengths_query, actual_seq_lengths_key,
-                        float(self.scale), self.tq_key_quant_mode, self.tq_value_quant_mode, 1, "TND", "PA_BSND",
-                        3, 9223372036854775807, 9223372036854775807, 2, 1, self.tq_tile_size,
-                        self.qk_rope_head_dim)
-                    return _ts.had_inv(_ao, head_dim=self.kv_lora_rank)
+                _op = torch.ops._C_ascend.turboquant_sparse_flash_attention
+                _ao = _op(
+                    _q, kv, kv, topk_indices, None, None, block_table,
+                    actual_seq_lengths_query, actual_seq_lengths_key,
+                    float(self.scale), self.tq_key_quant_mode, self.tq_value_quant_mode, 1, "TND", "PA_BSND",
+                    3, 9223372036854775807, 9223372036854775807, 2, 1, self.tq_tile_size,
+                    self.qk_rope_head_dim)
+                return _ts.had_inv(_ao, head_dim=self.kv_lora_rank)
+            if ql_nope.shape[0] == block_table.shape[0]:  # DECODE (1 q-tok/req, any batch B) -> vendor fused op
+                _q = torch.cat([_ts.had_fwd(ql_nope, head_dim=self.kv_lora_rank), q_pe], dim=-1).contiguous()
                 _ao = torch_npu.npu_kv_quant_sparse_flash_attention(
                     _q, kv, kv, topk_indices, float(self.scale), self.tq_key_quant_mode, self.tq_value_quant_mode,
                     block_table=block_table,
