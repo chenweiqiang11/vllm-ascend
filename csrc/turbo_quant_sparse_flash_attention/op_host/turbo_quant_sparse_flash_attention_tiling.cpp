@@ -19,7 +19,6 @@
 #include <algorithm>
 #include <graph/utils/type_utils.h>
 #include "error/ops_error.h"
-#include "op_common/log/log.h"
 #include "register/op_def_registry.h"
 #include "../op_kernel/turbo_quant_sparse_flash_attention_template_tiling_key.h"
 #include "turbo_quant_sparse_flash_attention_tiling.h"
@@ -131,7 +130,7 @@ static std::string QSFADataTypeToSerialString(ge::DataType type)
     if (qsfaIt != DATATYPE_TO_STRING_MAP.end()) {
         return qsfaIt->second;
     } else {
-        OP_LOGE("SparseFlashAttention", "datatype %d not support", type);
+        OPS_LOG_E("SparseFlashAttention", "datatype %d not support", type);
         return "UNDEFINED";
     }
 }
@@ -260,7 +259,6 @@ void QSFAMlaTiling::GenTilingKey()
     tilingKey_ = GET_TPL_TILING_KEY(0U, pageAttention, layoutQuery, layoutKV, \
         perfMode_ == QSFAPerfMode::V_TEMPLATE_MODE, static_cast<uint32_t>(qsfaInfo_->gSize > 64)); // G大于64时核间切G
     
-    OP_LOGI(qsfaInfo_->opName, "QSFA tilingKey_: %lu.", tilingKey_);
 }
 
 void QSFAMlaTiling::ZeroTensorProcess() const
@@ -460,7 +458,6 @@ void QSFAMlaTiling::CalcBlockDim()
     auto aivNum = 2 * usedCoreNum_;
 
     blockDim_ = ascendcPlatform.CalcTschBlockDim(aivNum, aicNum, aivNum);
-    OP_LOGI(qsfaInfo_->opName, "QSFA block dim: %u aiv Num: %u aic Num: %u.", blockDim_, aivNum, aicNum);
 }
 
 ge::graphStatus QSFAMlaTiling::DoOpTiling(QSFATilingInfo *qsfaInfo)
@@ -519,7 +516,7 @@ ge::graphStatus QSFATilingCheck::GetExpectedShape(gert::Shape &shapeExpected,
     } else if (layout == QSFALayout::PA_BSND) {
         shapeExpected = gert::Shape({param.Bn, param.Bs, param.N, param.D});
     } else {
-        OP_LOGE(opName_, "layout %s is unsupported", QSFALayoutToSerialString(layout).c_str());
+        OPS_LOG_E(opName_, "layout %s is unsupported", QSFALayoutToSerialString(layout).c_str());
         return ge::GRAPH_FAILED;
     }
     return ge::GRAPH_SUCCESS;
@@ -568,7 +565,7 @@ ge::graphStatus QSFATilingCheck::CheckDtypeSupport(const gert::CompileTimeTensor
     if (qsfaDesc != nullptr) {
         const auto& qsfaIt = DTYPE_SUPPORT_MAP.find(name);
         OPS_ERR_IF(qsfaIt == DTYPE_SUPPORT_MAP.end(),
-            OP_LOGE(opName_, "%s datatype support list should be specify in DTYPE_SUPPORT_MAP", name.c_str()),
+            OPS_LOG_E(opName_, "%s datatype support list should be specify in DTYPE_SUPPORT_MAP", name.c_str()),
             return ge::GRAPH_FAILED);
         auto &qsfaExpectDtypeList = qsfaIt->second;
         OPS_ERR_IF(std::find(
@@ -645,7 +642,7 @@ ge::graphStatus QSFATilingCheck::CheckLayoutSupport(const QSFALayout &actualLayo
 {
     const auto& qsfaItLayout = LAYOUT_SUPPORT_MAP.find(name);
     OPS_ERR_IF(qsfaItLayout == LAYOUT_SUPPORT_MAP.end(),
-        OP_LOGE(opName_, "%s layout support list should be specify in LAYOUT_SUPPORT_MAP", name.c_str()),
+        OPS_LOG_E(opName_, "%s layout support list should be specify in LAYOUT_SUPPORT_MAP", name.c_str()),
         return ge::GRAPH_FAILED);
     auto &qsfaExpectLayoutList = qsfaItLayout->second;
     OPS_ERR_IF(std::find(
@@ -759,7 +756,7 @@ ge::graphStatus QSFATilingCheck::CheckAttrValueByMap(std::map<std::string, std::
             qsfaOssExpect << std::to_string(qsfaPointerValuePair.second);
             std::ostringstream qsfaOssActual;
             qsfaOssActual << std::to_string(*(qsfaPointerValuePair.first));
-            OP_LOGE(opName_,
+            OPS_LOG_E(opName_,
                 "%s value should be %s, but got %s",
                 qsfaAttrName.c_str(),
                 qsfaOssExpect.str().c_str(),
