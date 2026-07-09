@@ -35,13 +35,13 @@ ge::graphStatus InferShapeTurboQuantSparseFlashAttention(gert::InferShapeContext
     OPS_ERR_IF(context == nullptr, OPS_REPORT_VECTOR_INNER_ERR("TurboQuantSparseFlashAttention", "InferShapeContext invalid"),
                return ge::GRAPH_FAILED);
     const gert::Shape *queryShape = context->GetInputShape(QUERY_INPUT_INDEX);
-    OP_CHECK_NULL_WITH_CONTEXT(context, queryShape);
+    OPS_LOG_E_IF_NULL(context, queryShape, return ge::GRAPH_FAILED)
     gert::Shape *attentionOutShape = context->GetOutputShape(0);
-    OP_CHECK_NULL_WITH_CONTEXT(context, attentionOutShape);
+    OPS_LOG_E_IF_NULL(context, attentionOutShape, return ge::GRAPH_FAILED)
     auto attrs = context->GetAttrs();
-    OP_CHECK_NULL_WITH_CONTEXT(context, attrs);
+    OPS_LOG_E_IF_NULL(context, attrs, return ge::GRAPH_FAILED)
     const char *inputLayoutQueryPtr = attrs->GetAttrPointer<char>(LAYOUT_QUERY_ATTR_INDEX);
-    OP_CHECK_NULL_WITH_CONTEXT(context, inputLayoutQueryPtr);
+    OPS_LOG_E_IF_NULL(context, inputLayoutQueryPtr, return ge::GRAPH_FAILED)
     std::string inputLayoutQueryPtrStr = std::string(inputLayoutQueryPtr);
     const int64_t ropeHeadDim = *attrs->GetAttrPointer<int64_t>(ROPE_HEAD_DIM_ATTR_INDEX);
 
