@@ -413,9 +413,6 @@ void QSFAMlaTiling::NormalCalcFDWorkSpace(const uint32_t actCoreNum)
         accumOutSize = FDParamNums * headDimAlign_;
         logSumExpSize = 2 * FDParamNums * (BYTE_BLOCK / qsfaInfo_->blockTypeSize); // log和sum的存储空间一致，共需�?份内�?
         workspaceSize_ += (accumOutSize + logSumExpSize) * qsfaInfo_->blockTypeSize;
-        if (qsfaInfo_->npuArch == NpuArch::DAV_2002) { // 310P
-            workspaceSize_ += static_cast<size_t>(actCoreNum) * 32; // 每个核SyncAll软同步需�?2Byte记录状�?
-        }
     }
 }
 
@@ -697,7 +694,7 @@ ge::graphStatus QSFATilingCheck::CheckSingleParaSparseMode() const
 
 ge::graphStatus QSFATilingCheck::CheckSingleParaSparseBlockSize() const
 {
-    OPS_ERR_IF((npuArch_ == NpuArch::DAV_2201) &&
+    OPS_ERR_IF(
         ((*opParamInfo_.sparseBlockSize <= 0 || *opParamInfo_.sparseBlockSize > 16) ||
         (static_cast<uint64_t>(*opParamInfo_.sparseBlockSize) &
          static_cast<uint64_t>(*opParamInfo_.sparseBlockSize - 1L)) != 0UL),
@@ -1217,7 +1214,6 @@ void QSFATilingCheck::Init()
     opName_ = qsfaInfo_.opName;
     platformInfo_ = qsfaInfo_.platformInfo;
     opParamInfo_ = qsfaInfo_.opParamInfo;
-    npuArch_ = qsfaInfo_.npuArch;
 
     bSize_ = qsfaInfo_.bSize;
     n1Size_ = qsfaInfo_.n1Size;
@@ -1387,11 +1383,6 @@ ge::graphStatus QSFAInfoParser::GetNpuInfo()
     OPS_ERR_IF(qsfaAicNum == 0 || qsfaAivNum == 0,
         OPS_REPORT_VECTOR_INNER_ERR(opName_, "num of core obtained is 0."), return GRAPH_FAILED);
 
-    npuArch_ = qsfaAscendcPlat.GetCurNpuArch();
-    if (npuArch_ != NpuArch::DAV_2201) {
-        OPS_REPORT_VECTOR_INNER_ERR(opName_, "Npu Arch Version[%d] is not support.", static_cast<int32_t>(npuArch_));
-        return GRAPH_FAILED;
-    }
 
     qsfaAscendcPlat.GetCoreMemSize(platform_ascendc::CoreMemType::L2, l2CacheSize_);
 
@@ -1740,7 +1731,6 @@ void QSFAInfoParser::GenerateInfo(QSFATilingInfo &qsfaInfo)
     qsfaInfo.opName = opName_;
     qsfaInfo.platformInfo = platformInfo_;
     qsfaInfo.opParamInfo = opParamInfo_;
-    qsfaInfo.npuArch = npuArch_;
 
     qsfaInfo.bSize = bSize_;
     qsfaInfo.n1Size = n1Size_;

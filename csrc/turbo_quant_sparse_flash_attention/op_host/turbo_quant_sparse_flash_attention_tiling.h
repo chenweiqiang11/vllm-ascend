@@ -21,7 +21,6 @@
 #include <exe_graph/runtime/tiling_context.h>
 #include "register/tilingdata_base.h"
 #include "exe_graph/runtime/tiling_context.h"
-#include "platform/soc_spec.h"
 namespace optiling {
 // ------------------算子原型索引常量定义----------------
 // Inputs Index
@@ -231,7 +230,6 @@ struct QSFATilingInfo {
     QSFAParaInfo opParamInfo;
 
     // Base Param
-    NpuArch npuArch = NpuArch::DAV_2201;
     uint32_t bSize = 0;
     uint32_t n1Size = 0;
     uint32_t n2Size = 0;
@@ -491,7 +489,6 @@ private:
 
     uint32_t aicNum_ = 0;
     uint32_t aivNum_ = 0;
-    NpuArch npuArch_ = NpuArch::DAV_2201;
     uint64_t l2CacheSize_ = 0;
 
     ge::DataType inputQType_ = ge::DT_FLOAT16;
@@ -584,7 +581,6 @@ public:
     uint32_t maxBlockNumPerBatch_ = 0;
     uint32_t blockSize_ = 0;
 
-    NpuArch npuArch_ = NpuArch::DAV_2201;
 
     ge::DataType inputQType_ = ge::DT_FLOAT16;
     ge::DataType inputKvType_ = ge::DT_FLOAT16;
