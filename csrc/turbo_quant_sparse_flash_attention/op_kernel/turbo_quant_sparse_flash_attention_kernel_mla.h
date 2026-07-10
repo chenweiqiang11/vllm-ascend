@@ -91,10 +91,6 @@ private:
     static constexpr uint32_t SYNC_C2_V1_FLAG = 4;
     static constexpr uint32_t SYNC_V1_NUPDATE_C2_FLAG = 5;
 
-    static constexpr uint64_t SYNC_MM2RES_BUF1_FLAG = 10;
-    static constexpr uint64_t SYNC_MM2RES_BUF2_FLAG = 11;
-    static constexpr uint64_t SYNC_FDOUTPUT_BUF_FLAG = 12;
-
     static constexpr uint32_t BLOCK_ELEMENT_NUM = QSFAVectorService<QSFAT>::BYTE_BLOCK / sizeof(T);
 
     static constexpr uint64_t kvHeadNum = 1ULL;
@@ -180,14 +176,11 @@ private:
     __aicore__ inline uint32_t GetActualSeqLenKV(uint32_t bIdx);
     __aicore__ inline void GetBN2Idx(uint32_t bN2Idx, uint32_t &bIdx, uint32_t &n2Idx);
     __aicore__ inline void GetPreNextTokensLeftUp();
-    __aicore__ inline void UpdateInner(uint32_t &s2End, uint32_t &curS2End, uint32_t s1Idx, bool isEnd);
     // ================================Mm1==============================================
     __aicore__ inline void ComputeMm1(const RunInfo &info);
     // ================================Mm2==============================================
     __aicore__ inline void InitAllZeroOutput(uint32_t bIdx, uint32_t s1Idx, uint32_t n2Idx);
     __aicore__ inline void ComputeMm2(const RunInfo &info);
-    __aicore__ inline void Bmm2DataCopyOut(uint64_t attenOutOffset, LocalTensor<OUT_T> &attenOutUb, uint32_t startRow,
-                                           uint32_t dealRowCount, uint32_t columnCount, uint32_t actualColumnCount);
 };
 
 template <typename QSFAT> __aicore__ inline void TurboQuantSparseFlashAttentionMla<QSFAT>::InitTilingData()
@@ -409,18 +402,6 @@ template <typename QSFAT> __aicore__ inline void TurboQuantSparseFlashAttentionM
 }
 
 template <typename QSFAT>
-__aicore__ inline void TurboQuantSparseFlashAttentionMla<QSFAT>::UpdateInner(uint32_t &s2End, uint32_t &curS2End,
-                                                                            uint32_t s1Idx, bool isEnd)
-{
-    uint32_t s1BaseSize = 1;
-    int64_t s1Offset = s1BaseSize * s1Idx;
-    int64_t s2LastToken = Min(s1Offset + tempLoopInfo.nextTokensPerBatch + s1BaseSize, tempLoopInfo.curActualSeqLenOri);
-    s2LastToken = Min(constInfo.sparseBlockSize * constInfo.sparseBlockCount, s2LastToken);
-    curS2End = (s2LastToken + constInfo.s2BaseSize - 1) / constInfo.s2BaseSize;
-    tempLoopInfo.s2LoopTimes = isEnd ? constInfo.s2End + 1 : curS2End;
-}
-
-template <typename QSFAT>
 __aicore__ inline void TurboQuantSparseFlashAttentionMla<QSFAT>::Init(__gm__ uint8_t *query,
     __gm__ uint8_t *key, __gm__ uint8_t *value,
     __gm__ uint8_t *sparseIndices, __gm__ uint8_t* keyScale,
@@ -610,23 +591,6 @@ template <typename QSFAT> __aicore__ inline void TurboQuantSparseFlashAttentionM
         return;
     }
 }
-
-template <typename QSFAT>
-__aicore__ inline void
-TurboQuantSparseFlashAttentionMla<QSFAT>::Bmm2DataCopyOut(uint64_t attenOutOffset, LocalTensor<OUT_T> &attenOutUb,
-                                                         uint32_t startRow, uint32_t dealRowCount,
-                                                         uint32_t columnCount, uint32_t actualColumnCount)
-{
-    DataCopyExtParams dataCopyParams;
-    dataCopyParams.blockCount = dealRowCount;
-    dataCopyParams.blockLen = actualColumnCount * sizeof(OUT_T);
-    dataCopyParams.srcStride = (columnCount - actualColumnCount) / (QSFAVectorService<QSFAT>::BYTE_BLOCK /
-        sizeof(OUT_T));
-    dataCopyParams.dstStride = 0;
-    DataCopyPad(attentionOutGm[attenOutOffset + (mSizeVStart + startRow) * actualColumnCount], attenOutUb,
-                dataCopyParams);
-}
-
 
 template <typename QSFAT>
 __aicore__ inline void TurboQuantSparseFlashAttentionMla<QSFAT>::CalcParams(uint32_t loop, uint64_t s2Start,

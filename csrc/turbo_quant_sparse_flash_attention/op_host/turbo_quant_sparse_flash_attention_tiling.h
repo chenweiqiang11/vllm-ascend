@@ -20,7 +20,6 @@
 #include <tiling/platform/platform_ascendc.h>
 #include <exe_graph/runtime/tiling_context.h>
 #include "register/tilingdata_base.h"
-#include "exe_graph/runtime/tiling_context.h"
 namespace optiling {
 // ------------------算子原型索引常量定义----------------
 // Inputs Index
@@ -55,12 +54,9 @@ constexpr size_t DIM_NUM_THREE = 3;
 constexpr size_t DIM_NUM_FOUR = 4;
 // 常量
 constexpr uint32_t MAX_BLOCK_SIZE = 1024;
-constexpr uint32_t COPYND2NZ_SRC_STRIDE_LIMITATION = 65535;
-constexpr uint32_t NUM_BYTES_FLOAT = 4;
 constexpr uint32_t NUM_BYTES_FLOAT16 = 2;
 constexpr uint32_t NUM_BYTES_BF16 = 2;
 constexpr uint32_t BYTE_BLOCK = 32;
-const uint32_t QSFA_MAX_AIC_CORE_NUM = 26; // 25 + 1 保证数组8字节对齐
 
 // ------------------公共定义--------------------------
 enum class QSFALayout : uint32_t {
@@ -219,8 +215,6 @@ template <typename T> inline T Align(T num, T rnd)
 }
 
 static std::string QSFADataTypeToSerialString(ge::DataType type);
-std::string QSFATensorDesc2String(const gert::StorageShape *shape, const gert::CompileTimeTensorDesc *tensor);
-std::string QSFADebugTilingContext(const gert::TilingContext *context);
 std::string QSFALayoutToSerialString(QSFALayout layout);
 
 // -----------算子Tiling入参信息�?--------------
@@ -306,18 +300,14 @@ private:
     gert::TilingContext *context_ = nullptr;
     ge::graphStatus GetPlatformInfo();
     void GenTilingKey();
-    bool DealSameSeqEachBatch();
 
     void ZeroTensorProcess() const;
     void InitParams();
 
     void Split();
-    bool IsBalanceSplitCore();
 
     void SplitBalanced();
     void CalcInnerSize(uint32_t qsfaS2Size);
-
-    bool IsFlashDecode(uint32_t coreNum);
 
     void FillTilingBaseParamsMla();
     void FillTilingSplitKVMla();
@@ -400,28 +390,18 @@ private:
     ge::graphStatus CheckLayoutSupport(const QSFALayout &actualLayout, const std::string &name) const;
     ge::graphStatus CheckSingleParaQuery() const;
     ge::graphStatus CheckSingleParaKey() const;
-    ge::graphStatus CheckSingleParaValue() const;
-    ge::graphStatus CheckSingleParaAttenOut() const;
     ge::graphStatus CheckSingleParaNumHeads() const;
     ge::graphStatus CheckSingleParaKvHeadNums() const;
-    ge::graphStatus CheckSingleParaLayout() const;
     ge::graphStatus CheckSingleParaSparseMode() const;
     ge::graphStatus CheckSingleParaSparseBlockSize() const;
     ge::graphStatus CheckSingleParaSparseIndices() const;
     ge::graphStatus CheckSinglePara() const;
     ge::graphStatus CheckMultiParaConsistency() const;
     ge::graphStatus CheckDequantScaleNotExistence();
-    template <typename T> ge::graphStatus CheckAttrValueByMap(
-        std::map<std::string, std::pair<const T *, T>> &attrMap) const;
     ge::graphStatus CheckParaExistenceMlaAntiquant() const;
-    ge::graphStatus CheckParaExistenceGqaAntiquant() const;
     ge::graphStatus CheckParaExistenceMla() const;
     ge::graphStatus CheckParaExistence();
     void SetQSFAShapeCompare();
-    ge::graphStatus CheckKVDType();
-    ge::graphStatus CheckKVShapeForBatchContinuous();
-    ge::graphStatus CheckKVShapeForPageAttention();
-    ge::graphStatus CheckKVShape();
     ge::graphStatus CheckKV();
     ge::graphStatus CheckTopK();
     ge::graphStatus CheckTopkShape();
@@ -519,7 +499,6 @@ public:
     void GetOutputParaInfo();
     ge::graphStatus GetAttrParaInfo();
     ge::graphStatus GetOpParaInfo();
-    ge::graphStatus GetKvCache();
 
     ge::graphStatus GetInOutDataType();
     ge::graphStatus GetQTSize();
@@ -538,7 +517,6 @@ public:
     ge::graphStatus GetS2Size();
     ge::graphStatus GetValueHeadDim();
     ge::graphStatus GetDSizeKV();
-    ge::graphStatus GetRopeHeadDim();
     ge::graphStatus GetQueryAndOutLayout();
     ge::graphStatus GetTopkLayout();
     ge::graphStatus GetN1Size();

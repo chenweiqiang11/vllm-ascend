@@ -21,7 +21,6 @@
 #include "lib/matmul_intf.h"
 #include "lib/matrix/matmul/tiling.h"
 #include "turbo_quant_sparse_flash_attention_common.h"
-#include "tq4_centroids.h"
 
 using AscendC::CrossCoreSetFlag;
 using AscendC::CrossCoreWaitFlag;
@@ -36,7 +35,6 @@ public:
     using UPDATE_T = T;
     using MM1_OUT_T = float;
     using MM2_OUT_T = float;
-    bool NO_AMLA = true;
 
     __aicore__ inline QSFAVectorService(){};
     __aicore__ inline void ProcessVec1L(const RunInfo &info);
@@ -113,8 +111,6 @@ public:
                                              uint32_t dealRowCount, uint32_t columnCount,
                                              uint32_t actualColumnCount);
     __aicore__ inline uint64_t CalcAccumOffset(uint32_t bN2Idx, uint32_t gS1Idx);
-    __aicore__ inline void GetConfusionTransposeTiling(int64_t numR, int64_t numC, const uint32_t stackBufferSize,
-                                                       const uint32_t typeSize, ConfusionTransposeTiling &tiling);
 
     // BLOCK和REPEAT的字节数
     static constexpr uint64_t BYTE_BLOCK = 32UL;
@@ -1106,27 +1102,6 @@ __aicore__ inline void QSFAVectorService<QSFAT>::ProcessVec2Inner(const RunInfo 
     }
 }
 
-
-template <typename QSFAT>
-__aicore__ inline void QSFAVectorService<QSFAT>::GetConfusionTransposeTiling(
-    int64_t numR, int64_t numC, const uint32_t stackBufferSize, const uint32_t typeSize,
-    ConfusionTransposeTiling &tiling)
-{
-    (void)stackBufferSize;
-    uint32_t qsfaBlockSize = ONE_BLK_SIZE / typeSize;
-    uint32_t qsfaHeight = numC;
-    uint32_t qsfaWidth = numR;
-    uint32_t qsfaHighBlock = qsfaHeight / BLOCK_CUBE;
-    uint32_t qsfaStride = qsfaHeight * qsfaBlockSize * typeSize / ONE_BLK_SIZE;
-    uint32_t qsfaRepeat = qsfaWidth / qsfaBlockSize;
-
-    tiling.param0 = qsfaBlockSize;
-    tiling.param1 = qsfaHeight;
-    tiling.param2 = qsfaWidth;
-    tiling.param3 = qsfaHighBlock;
-    tiling.param4 = qsfaStride;
-    tiling.param5 = qsfaRepeat;
-}
 
 template <typename QSFAT>
 __aicore__ inline void

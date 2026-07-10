@@ -62,56 +62,6 @@ __aicore__ inline void DataCopyGmNDToL1(LocalTensor<T> &l1Tensor, GlobalTensor<T
     DataCopy(l1Tensor, gmTensor, nd2nzPara);
 }
 
-/*
-    适用PA数据从GM拷贝到L1，支持ND、NZ数据；
-    PA的layout分 BNBD（blockNum,N,blockSize,D） BBH（blockNum,blockSize,N*D
-    BSH\BSND\TND 为BBH
-    shape.copyRowNumAlign 需要16字节对齐，如拷贝k矩阵，一次拷贝128*512，遇到尾块 10*512 需对齐到16*512
-*/
-template <typename T, QSFA_LAYOUT SRC_LAYOUT>
-__aicore__ inline void DataCopyPA(LocalTensor<T> &dstTensor,  // l1
-                                  GlobalTensor<T> &srcTensor, // gm
-                                  GlobalTensor<int32_t> &blockTableGm,
-                                  const PAShape &shape,       // blockSize, headNum, headDim
-                                  const Position &startPos)   // bacthIdx nIdx curSeqIdx
-{
-    uint32_t copyFinishRowCnt = 0;
-    uint64_t blockTableBaseOffset = startPos.bIdx * shape.maxblockNumPerBatch;
-    uint32_t curS2Idx = startPos.s2Idx;
-    uint32_t blockElementCnt = 32 / sizeof(T);
-    while (copyFinishRowCnt < shape.copyRowNum) {
-        uint64_t blockIdOffset = curS2Idx / shape.blockSize;   // 获取block table上的索引
-        uint64_t reaminRowCnt = curS2Idx % shape.blockSize;    // 获取在单个块上超出的行数
-        // 从block table上的获取编号
-        uint64_t idInBlockTable = blockTableGm.GetValue(blockTableBaseOffset + blockIdOffset);
-        // 计算可以拷贝行数
-        uint32_t copyRowCnt = shape.blockSize - reaminRowCnt;  // 一次只能处理一个Block
-        if (copyFinishRowCnt + copyRowCnt > shape.copyRowNum) {
-            copyRowCnt = shape.copyRowNum - copyFinishRowCnt;  // 一个block未拷满
-        }
-        uint64_t offset = idInBlockTable * shape.blockSize * shape.headNum * shape.headDim ;   // PA的偏移
-
-        uint64_t dStride = shape.headDim;
-        if constexpr (SRC_LAYOUT == QSFA_LAYOUT::BSND || SRC_LAYOUT == QSFA_LAYOUT::TND) {
-            offset += (uint64_t)(startPos.n2Idx * shape.headDim) +
-                      reaminRowCnt * shape.headDim * shape.headNum + startPos.dIdx;
-            dStride = shape.headDim * shape.headNum;
-        } else {
-            offset += (uint64_t)(startPos.n2Idx * shape.headDim * shape.blockSize) +
-                      reaminRowCnt * shape.headDim + startPos.dIdx;
-        }
-
-        uint32_t srcDValue = dStride;
-        uint32_t dValue = shape.actHeadDim;
-        LocalTensor<T> tmpDstTensor = dstTensor[copyFinishRowCnt * blockElementCnt];
-        GlobalTensor<T> tmpSrcTensor = srcTensor[offset];
-
-        DataCopyGmNDToL1<T>(tmpDstTensor, tmpSrcTensor, copyRowCnt, shape.copyRowNumAlign, dValue, srcDValue);
-        copyFinishRowCnt += copyRowCnt;
-        curS2Idx += copyRowCnt;
-    }
-}
-
 template <typename QSFAT> class QSFAMatmulService {
 public:
     // 中间计算数据类型为float, 高精度模式
@@ -133,14 +83,9 @@ public:
                                                  GlobalTensor<int32_t> blockTableGm, GlobalTensor<int32_t> topKGm,
                                                  uint32_t blockSize, uint32_t maxBlockNumPerBatch);
     __aicore__ inline void InitBuffers(TPipe *pipe);
-    __aicore__ inline void UpdateKey(GlobalTensor<KV_T> keyGm);
-    __aicore__ inline void UpdateValue(GlobalTensor<KV_T> valueGm);
 
     __aicore__ inline void AllocEventID();
     __aicore__ inline void FreeEventID();
-    __aicore__ inline void CalcTopKBlockInfo(const RunInfo &info, uint32_t &curTopKIdx,
-                                             uint64_t &curOffsetInSparseBlock, uint32_t curSeqIdx,
-                                             uint32_t &copyRowCnt, uint64_t &idInTopK);
     __aicore__ inline void ComputeMm1(const RunInfo &info, const MSplitInfo mSplitInfo);
     __aicore__ inline void ComputeMm2(const RunInfo &info, const MSplitInfo mSplitInfo);
 
@@ -239,20 +184,8 @@ private:
                                       uint32_t srcN, uint32_t srcD, uint32_t srcDstride);
     __aicore__ inline void CopyInMm1AToL1(LocalTensor<K_ROPE_T> &aL1Tensor, const RunInfo &info, uint32_t mSeqIdx,
                                           uint32_t mSizeAct, uint32_t headSize, uint32_t headOffset);
-    __aicore__ inline void CopyInMm1ARopeToL1(LocalTensor<K_ROPE_T> &aL1Tensor, const RunInfo &info, uint32_t mSeqIdx,
-                                              uint32_t mSizeAct);
-    __aicore__ inline void CopyInMm1BToL1(LocalTensor<K_ROPE_T> &bL1Tensor, const uint64_t keyGmBaseOffset,
-                                          uint32_t copyTotalRowCntAlign, uint32_t copyStartRowCnt,
-                                          uint32_t nActCopyRowCount, uint32_t headSize);
-    __aicore__ inline void CopyInMm1BRopeToL1(LocalTensor<K_ROPE_T> &bL1Tensor, const uint64_t keyGmBaseOffset,
-                                              uint32_t copyTotalRowCntAlign, uint32_t copyStartRowCnt,
-                                              uint32_t nActCopyRowCount, uint32_t headSize);
     __aicore__ inline void CopyInMm2AToL1(LocalTensor<K_ROPE_T> &aL1Tensor, const RunInfo &info, uint32_t mSeqIdx,
                                           uint32_t subMSizeAct, uint32_t nSize, uint32_t nOffset);
-    __aicore__ inline void CopyInMm2BToL1(LocalTensor<K_ROPE_T> &bL1Tensor, const uint64_t valueGmBaseOffset,
-                                          uint32_t copyTotalRowCntAlign, uint32_t copyStartRowCnt,
-                                          uint32_t nActCopyRowCount, uint32_t copyStartColumnCount,
-                                          uint32_t copyColumnCount);
     __aicore__ inline void LoadDataMm1A(LocalTensor<K_ROPE_T> &aL0Tensor, LocalTensor<K_ROPE_T> &aL1Tensor,
                                         uint32_t idx, uint32_t kSplitSize, uint32_t mSize, uint32_t kSize);
     __aicore__ inline void LoadDataMm1B(LocalTensor<K_ROPE_T> &bL0Tensor, LocalTensor<K_ROPE_T> &bL1Tensor,
@@ -321,16 +254,6 @@ template <typename QSFAT> __aicore__ inline void QSFAMatmulService<QSFAT>::InitB
     cL0TensorPingPong = tmpBufL0C.Get<MM_OUT_T>();
 }
 
-template <typename QSFAT> __aicore__ inline void QSFAMatmulService<QSFAT>::UpdateKey(GlobalTensor<KV_T> keyGm)
-{
-    this->keyGm = keyGm;
-}
-
-template <typename QSFAT> __aicore__ inline void QSFAMatmulService<QSFAT>::UpdateValue(GlobalTensor<KV_T> valueGm)
-{
-    this->valueGm = valueGm;
-}
-
 template <typename QSFAT> __aicore__ inline void QSFAMatmulService<QSFAT>::AllocEventID()
 {
     SetFlag<HardEvent::M_MTE1>(L0AB_EVENT0);
@@ -381,65 +304,6 @@ __aicore__ inline void QSFAMatmulService<QSFAT>::CopyInMm1AToL1(LocalTensor<K_RO
 {
     auto srcGm = queryGm[info.tensorAOffset + mSeqIdx * constInfo.combineHeadDim + headOffset];
     CopyGmToL1(l1Tensor, srcGm, mSizeAct, headSize, headSize);
-}
-
-template <typename QSFAT>
-__aicore__ inline void QSFAMatmulService<QSFAT>::CopyInMm1ARopeToL1(LocalTensor<K_ROPE_T> &l1Tensor,
-                                                                    const RunInfo &info, uint32_t mSeqIdx,
-                                                                    uint32_t mSizeAct)
-{
-    auto srcGm = qRopeGm[info.tensorARopeOffset + mSeqIdx * constInfo.headDimRope];
-    CopyGmToL1(l1Tensor, srcGm, mSizeAct, constInfo.headDimRope, constInfo.headDimRope);
-}
-
-template <typename QSFAT>
-__aicore__ inline void
-QSFAMatmulService<QSFAT>::CopyInMm1BToL1(LocalTensor<K_ROPE_T> &bL1Tensor, const uint64_t keyGmBaseOffset,
-                                         uint32_t copyTotalRowCntAlign, uint32_t copyStartRowCnt,
-                                         uint32_t nActCopyRowCount, uint32_t headSize)
-{
-    uint64_t dStride = constInfo.headDim;
-    if constexpr (LAYOUT_T == QSFA_LAYOUT::BSND || LAYOUT_T == QSFA_LAYOUT::TND) {
-        dStride = constInfo.headDim * constInfo.kvHeadNum;
-    }
-
-    uint32_t blockElementCnt = 32 / sizeof(K_ROPE_T);
-
-    Nd2NzParams mm1Nd2NzParamsForB;
-    mm1Nd2NzParamsForB.ndNum = 1;
-    mm1Nd2NzParamsForB.nValue = nActCopyRowCount;
-    mm1Nd2NzParamsForB.dValue = headSize;
-    mm1Nd2NzParamsForB.srcDValue = dStride;
-    mm1Nd2NzParamsForB.dstNzNStride = 1;
-    mm1Nd2NzParamsForB.dstNzC0Stride = copyTotalRowCntAlign;
-    mm1Nd2NzParamsForB.srcNdMatrixStride = 0;
-    mm1Nd2NzParamsForB.dstNzMatrixStride = 0;
-    DataCopy(bL1Tensor[copyStartRowCnt * blockElementCnt], keyGm[keyGmBaseOffset], mm1Nd2NzParamsForB);
-}
-
-template <typename QSFAT>
-__aicore__ inline void
-QSFAMatmulService<QSFAT>::CopyInMm1BRopeToL1(LocalTensor<K_ROPE_T> &bL1Tensor, const uint64_t kRopeGmBaseOffset,
-                                             uint32_t copyTotalRowCntAlign, uint32_t copyStartRowCnt,
-                                             uint32_t nActCopyRowCount, uint32_t headSize)
-{
-    uint64_t dStride = constInfo.headDimRope;
-    if constexpr (LAYOUT_T == QSFA_LAYOUT::BSND || LAYOUT_T == QSFA_LAYOUT::TND) {
-        dStride = constInfo.headDimRope * constInfo.kvHeadNum;
-    }
-
-    uint32_t blockElementCnt = 32 / sizeof(K_ROPE_T);
-
-    Nd2NzParams mm1Nd2NzParamsForB;
-    mm1Nd2NzParamsForB.nValue = nActCopyRowCount;
-    mm1Nd2NzParamsForB.dValue = headSize;
-    mm1Nd2NzParamsForB.ndNum = 1;
-    mm1Nd2NzParamsForB.srcDValue = dStride;
-    mm1Nd2NzParamsForB.srcNdMatrixStride = 0;
-    mm1Nd2NzParamsForB.dstNzMatrixStride = 0;
-    mm1Nd2NzParamsForB.dstNzNStride = 1;
-    mm1Nd2NzParamsForB.dstNzC0Stride = copyTotalRowCntAlign;
-    DataCopy(bL1Tensor[copyStartRowCnt * blockElementCnt], kRopeGm[kRopeGmBaseOffset], mm1Nd2NzParamsForB);
 }
 
 template <typename QSFAT>
@@ -501,92 +365,6 @@ __aicore__ inline void QSFAMatmulService<QSFAT>::CopyInMm2AToL1(LocalTensor<K_RO
     auto srcGm = vec1ResGm[(info.loop % constInfo.preLoadNum) * constInfo.mmResUbSize +
                            mSeqIdx * info.actualSingleProcessSInnerSizeAlign + nOffset];
     CopyGmToL1(aL1Tensor, srcGm, subMSizeAct, nSize, info.actualSingleProcessSInnerSizeAlign);
-}
-
-template <typename QSFAT>
-__aicore__ inline void QSFAMatmulService<QSFAT>::CopyInMm2BToL1(
-    LocalTensor<K_ROPE_T> &bL1Tensor, const uint64_t valueGmBaseOffset, uint32_t copyTotalRowCntAlign,
-    uint32_t copyStartRowCnt, uint32_t nActCopyRowCount, uint32_t copyStartColumnCount, uint32_t copyColumnCount)
-{
-    uint64_t step = constInfo.headDim;
-    if constexpr (LAYOUT_T == QSFA_LAYOUT::BSND || LAYOUT_T == QSFA_LAYOUT::TND) {
-        step = constInfo.headDim * constInfo.kvHeadNum;
-    }
-
-    uint32_t blockElementCnt = 32 / sizeof(K_ROPE_T);
-
-    Nd2NzParams mm1Nd2NzParamsForB;
-    mm1Nd2NzParamsForB.ndNum = 1;
-    mm1Nd2NzParamsForB.nValue = nActCopyRowCount;
-    mm1Nd2NzParamsForB.dValue = copyColumnCount;
-    mm1Nd2NzParamsForB.srcDValue = step;
-    mm1Nd2NzParamsForB.dstNzNStride = 1;
-    mm1Nd2NzParamsForB.dstNzC0Stride = copyTotalRowCntAlign;
-    mm1Nd2NzParamsForB.srcNdMatrixStride = 0;
-    mm1Nd2NzParamsForB.dstNzMatrixStride = 0;
-    DataCopy(bL1Tensor[copyStartRowCnt * blockElementCnt], valueGm[valueGmBaseOffset + copyStartColumnCount],
-             mm1Nd2NzParamsForB);
-}
-
-template <typename QSFAT>
-__aicore__ inline void QSFAMatmulService<QSFAT>::CalcTopKBlockInfo(
-    const RunInfo &info, uint32_t &curTopKIdx, uint64_t &curOffsetInSparseBlock,
-    uint32_t curSeqIdx, uint32_t &copyRowCnt, uint64_t &idInTopK)
-{
-    if (curTopKIdx == 0 && curOffsetInSparseBlock == 0 && copyRowCnt == 0) {
-        uint64_t sparseLen = 0;
-        for (uint64_t qsfaTopkidx = 0; qsfaTopkidx < constInfo.sparseBlockCount; qsfaTopkidx++) {
-            int32_t qsfaSparseIndices = topKGm.GetValue(info.topKBaseOffset + qsfaTopkidx);
-            if (qsfaSparseIndices == -1) {
-                break;
-            }
-            uint64_t qsfaBlockBegin = qsfaSparseIndices * constInfo.sparseBlockSize;
-            if (qsfaBlockBegin >= info.threshold) {
-                continue;
-            }
-            uint64_t qsfaBlockEnd = (qsfaBlockBegin + constInfo.sparseBlockSize > info.curActualSeqLenOri) ?
-                info.curActualSeqLenOri : qsfaBlockBegin + constInfo.sparseBlockSize;
-            uint64_t qsfaBlockLen = (qsfaBlockEnd <= info.threshold) ? \
-                qsfaBlockEnd - qsfaBlockBegin : info.threshold - qsfaBlockBegin;
-            sparseLen += qsfaBlockLen;
-            if (sparseLen >= curSeqIdx + 1) {
-                curTopKIdx = qsfaTopkidx;
-                idInTopK = qsfaSparseIndices;
-                curOffsetInSparseBlock = qsfaBlockLen - (sparseLen - curSeqIdx);
-                copyRowCnt = sparseLen - curSeqIdx;
-                break;
-            }
-        }
-        return;
-    }
-    uint64_t qsfaBlockBegin = idInTopK * constInfo.sparseBlockSize;
-    uint64_t qsfaBlockEnd = (qsfaBlockBegin + constInfo.sparseBlockSize > info.threshold) ?
-                        info.threshold : qsfaBlockBegin + constInfo.sparseBlockSize;
-    uint64_t qsfaBlockLen = qsfaBlockEnd - qsfaBlockBegin;
-    if (curOffsetInSparseBlock + copyRowCnt < qsfaBlockLen) {
-        curOffsetInSparseBlock += copyRowCnt;
-        copyRowCnt = qsfaBlockLen - curOffsetInSparseBlock;
-    } else {
-        for (uint64_t qsfaTopkidx = curTopKIdx + 1; qsfaTopkidx < constInfo.sparseBlockCount; qsfaTopkidx++) {
-            int64_t qsfaSparseIndices = topKGm.GetValue(info.topKBaseOffset + qsfaTopkidx);
-            if (qsfaSparseIndices == -1) {
-                break;
-            }
-
-            uint64_t qsfaBlockBegin = qsfaSparseIndices * constInfo.sparseBlockSize;
-            if (qsfaBlockBegin >= info.threshold) {
-                continue;
-            }
-            uint64_t qsfaBlockEnd = (qsfaBlockBegin + constInfo.sparseBlockSize > info.threshold) ?
-                                info.threshold : qsfaBlockBegin + constInfo.sparseBlockSize;
-            uint64_t qsfaBlockLen = qsfaBlockEnd - qsfaBlockBegin;
-            curTopKIdx = qsfaTopkidx;
-            idInTopK = qsfaSparseIndices;
-            curOffsetInSparseBlock = 0;
-            copyRowCnt = qsfaBlockLen;
-            break;
-        }
-    }
 }
 
 template <typename QSFAT>

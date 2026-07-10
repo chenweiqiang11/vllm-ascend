@@ -15,7 +15,6 @@
 
 #include <map>
 #include <vector>
-#include <numeric>
 #include <algorithm>
 #include <graph/utils/type_utils.h>
 #include "error/ops_error.h"
@@ -33,13 +32,11 @@ namespace optiling {
 
 constexpr uint32_t PRE_LOAD_NUM = 2;
 constexpr uint32_t BLOCK_TABLE_ELEM_BYTE = 4;
-constexpr int32_t SPARSE_MODE_BAND = 4;
 
 static const std::string QUERY_NAME = "query";
 static const std::string KEY_NAME = "key";
 static const std::string VALUE_NAME = "value";
 static const std::string SPARSE_INDICES_NAME = "sparse_indices";
-static const std::string BLOCK_TABLE_NAME = "block_table";
 static const std::string ATTEN_OUT_NAME = "attention_out";
 
 const std::map<std::string, std::vector<ge::DataType>> DTYPE_SUPPORT_MAP = {
@@ -109,21 +106,6 @@ static const std::map<QSFALayout, size_t> QSFA_LAYOUT_DIM_MAP = {
     {QSFALayout::PA_BSND, DIM_NUM_FOUR},
 };
 
-template <typename T>
-static std::string GetShapeStr(const T &shape)
-{
-    std::ostringstream qsfaOss;
-    qsfaOss << "[";
-    if (shape.GetDimNum() > 0) {
-        for (size_t i = 0; i < shape.GetDimNum() - 1; ++i) {
-            qsfaOss << shape.GetDim(i) << ", ";
-        }
-        qsfaOss << shape.GetDim(shape.GetDimNum() - 1);
-    }
-    qsfaOss << "]";
-    return qsfaOss.str();
-}
-
 static std::string QSFADataTypeToSerialString(ge::DataType type)
 {
     const auto qsfaIt = DATATYPE_TO_STRING_MAP.find(type);
@@ -135,41 +117,6 @@ static std::string QSFADataTypeToSerialString(ge::DataType type)
     }
 }
 
-string QSFATensorDesc2String(const gert::StorageShape *shape, const gert::CompileTimeTensorDesc *tensor)
-{
-    if (shape == nullptr || tensor == nullptr) {
-        return "nil ";
-    }
-
-    std::ostringstream qsfaOss;
-    qsfaOss << "(dtype: " << ge::TypeUtils::DataTypeToAscendString(tensor->GetDataType()).GetString() << "),";
-    qsfaOss << "(shape:" << GetShapeStr(shape->GetStorageShape()) << "),";
-    qsfaOss << "(ori_shape:" << GetShapeStr(shape->GetOriginShape()) << "),";
-    qsfaOss << "(format: "
-        << ge::TypeUtils::FormatToAscendString(
-            static_cast<ge::Format>(ge::GetPrimaryFormat(tensor->GetStorageFormat())))
-            .GetString()
-        << "),";
-    qsfaOss << "(ori_format: " << ge::TypeUtils::FormatToAscendString(tensor->GetOriginFormat()).GetString() << ") ";
-
-    return qsfaOss.str();
-}
-
-string QSFADebugTilingContext(const gert::TilingContext *context)
-{
-    std::ostringstream qsfaOss;
-    for (size_t i = 0; i < context->GetComputeNodeInfo()->GetInputsNum(); ++i) {
-        qsfaOss << "input" << i << ": ";
-        qsfaOss << QSFATensorDesc2String(context->GetInputShape(i), context->GetInputDesc(i));
-    }
-
-    for (size_t i = 0; i < context->GetComputeNodeInfo()->GetOutputsNum(); ++i) {
-        qsfaOss << "output" << i << ": ";
-        qsfaOss << QSFATensorDesc2String(context->GetOutputShape(i), context->GetOutputDesc(i));
-    }
-    return qsfaOss.str();
-}
-
 std::string QSFALayoutToSerialString(QSFALayout layout)
 {
     switch (layout) {
@@ -178,22 +125,6 @@ std::string QSFALayoutToSerialString(QSFALayout layout)
         case QSFALayout::PA_BSND: return "PA_BSND";
         default: return "UNKNOWN";
     }
-}
-
-static uint32_t GetTypeSize(ge::DataType dtype)
-{
-    uint32_t qsfaTypeSize = NUM_BYTES_FLOAT16;
-    switch (dtype) {
-        case ge::DT_FLOAT16:
-            qsfaTypeSize = NUM_BYTES_FLOAT16;
-            break;
-        case ge::DT_BF16:
-            qsfaTypeSize = NUM_BYTES_BF16;
-            break;
-        default:
-            qsfaTypeSize = NUM_BYTES_FLOAT16;
-    }
-    return qsfaTypeSize;
 }
 
 ge::graphStatus QSFAMlaTiling::SetBlockDim(uint32_t blockDim) const
@@ -737,33 +668,6 @@ ge::graphStatus QSFATilingCheck::CheckDequantScaleNotExistence()
     return ge::GRAPH_SUCCESS;
 }
 
-template <typename T>
-ge::graphStatus QSFATilingCheck::CheckAttrValueByMap(std::map<std::string, std::pair<const T *, T>> &attrMap) const
-{
-    for (auto const &kv : attrMap) {
-        const std::string &qsfaAttrName = kv.first;
-        const std::pair<const T *, T> &qsfaPointerValuePair = kv.second;
-        if (qsfaPointerValuePair.first == nullptr) {
-            OPS_REPORT_VECTOR_INNER_ERR(opName_, "invalid input");
-            return ge::GRAPH_FAILED;
-        }
-
-        if (*(qsfaPointerValuePair.first) != qsfaPointerValuePair.second) {
-            std::ostringstream qsfaOssExpect;
-            qsfaOssExpect << std::to_string(qsfaPointerValuePair.second);
-            std::ostringstream qsfaOssActual;
-            qsfaOssActual << std::to_string(*(qsfaPointerValuePair.first));
-            OPS_LOG_E(opName_,
-                "%s value should be %s, but got %s",
-                qsfaAttrName.c_str(),
-                qsfaOssExpect.str().c_str(),
-                qsfaOssActual.str().c_str());
-            return ge::GRAPH_FAILED;
-        }
-    }
-    return ge::GRAPH_SUCCESS;
-}
-
 ge::graphStatus QSFATilingCheck::CheckParaExistenceMlaAntiquant() const
 {
     if (kvLayout_ == QSFALayout::BSND) {
@@ -890,51 +794,6 @@ ge::graphStatus QSFATilingCheck::CheckTopK()
         return ge::GRAPH_FAILED;
     }
     return ge::GRAPH_SUCCESS;
-}
-
-ge::graphStatus QSFATilingCheck::CheckKVShapeForBatchContinuous()
-{
-    QSFATilingShapeCompareParam shapeParams;
-    shapeParams.B = bSize_;
-    shapeParams.N = n2Size_;
-    shapeParams.S = s2Size_;
-    shapeParams.D = vHeadDim_;
-    shapeParams.T = kvTSize_;
-    if (CompareShape(shapeParams, valueShapeCmp_, kvLayout_, VALUE_NAME) != ge::GRAPH_SUCCESS) {
-        return ge::GRAPH_FAILED;
-    }
-
-    return ge::GRAPH_SUCCESS;
-}
-
-ge::graphStatus QSFATilingCheck::CheckKVShapeForPageAttention()
-{
-    int64_t blockNum = keyShapeCmp_.GetDim(0);
-    QSFATilingShapeCompareParam shapeParams;
-    shapeParams.Bn = blockNum;
-    shapeParams.N = n2Size_;
-    shapeParams.Bs = blockSize_;
-    shapeParams.T = kvTSize_;
-    shapeParams.D = vHeadDim_;
-    if (CompareShape(shapeParams, valueShapeCmp_, kvLayout_, VALUE_NAME) != ge::GRAPH_SUCCESS) {
-        return ge::GRAPH_FAILED;
-    }
-
-    return ge::GRAPH_SUCCESS;
-}
-
-ge::graphStatus QSFATilingCheck::CheckKVShape()
-{
-    if (kvStorageMode_ == KvStorageMode::BATCH_CONTINUOUS) {
-        return CheckKVShapeForBatchContinuous();
-    }
-
-    if (kvStorageMode_ == KvStorageMode::PAGE_ATTENTION) {
-        return CheckKVShapeForPageAttention();
-    }
-
-    OPS_REPORT_VECTOR_INNER_ERR(opName_, "kvStorageMode_ invalid");
-    return ge::GRAPH_FAILED;
 }
 
 ge::graphStatus QSFATilingCheck::CheckKV()
