@@ -1,6 +1,5 @@
 #include "tq_compress_latent_tiling.h"
 #include "register/op_impl_registry.h"
-#include "tiling/platform/platform_ascendc.h"
 
 namespace optiling {
 
@@ -26,8 +25,6 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     context->GetRawTilingData()->SetDataSize(tilingData.GetDataSize());
     return ge::GRAPH_SUCCESS;
 }
-
-struct TqCompressLatentCompileInfo {};
 
 IMPL_OP_OPTILING(TqCompressLatent)
     .Tiling(TilingFunc);

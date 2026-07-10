@@ -15,7 +15,6 @@ using namespace AscendC;
 constexpr uint32_t HEAD_DIM     = 512;
 constexpr uint32_t SLOT_PAD     = 320;
 constexpr uint32_t PACKED_BYTES = 256;   // 512 nibbles / 2
-constexpr uint32_t NIBS_PER_SRC = 128;   // int16 count
 constexpr uint32_t N_CENT       = 16;
 constexpr uint32_t ALIGN_BYTES  = 64;
 
@@ -42,7 +41,6 @@ public:
 
         pipe_.InitBuffer(inQ_, 1, fp32B);
         pipe_.InitBuffer(outQ_, 1, slotB);
-        pipe_.InitBuffer(zBuf_, fp32B);
         pipe_.InitBuffer(uBuf_, fp32B);
         pipe_.InitBuffer(nibBuf_, fp32B);
         pipe_.InitBuffer(tmpBuf_, fp32B);
@@ -151,7 +149,7 @@ private:
     TPipe pipe_;
     TQue<QuePosition::VECIN, 1> inQ_;
     TQue<QuePosition::VECOUT, 1> outQ_;
-    TBuf<TPosition::VECCALC> zBuf_, uBuf_, nibBuf_, tmpBuf_, selBuf_, oneBuf_, redBuf_, centBuf_, maskBuf_;
+    TBuf<TPosition::VECCALC> uBuf_, nibBuf_, tmpBuf_, selBuf_, oneBuf_, redBuf_, centBuf_, maskBuf_;
     TBuf<TPosition::VECCALC> packHalfBuf_;
     GlobalTensor<float> latentGm_;
     GlobalTensor<float> centGm_;
