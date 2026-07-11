@@ -1,9 +1,26 @@
+# TQ_RW_PATCHED
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeVar
 
 import scipy  # type: ignore
+import os
 import torch
 import torch_npu
+
+
+def _tq_store():
+    from vllm_ascend.turboquant import tq_latent_store as _tls
+    return _tls
+
+
+def _tq_packed_bytes(kv_lora_rank: int) -> int:
+    return kv_lora_rank // 2
+
+
+
+
+def _tq_fused_slot_bytes(kv_lora_rank: int, qk_rope_head_dim: int) -> int:
+    return _tq_packed_bytes(kv_lora_rank) + qk_rope_head_dim * 2 + 2
 import vllm.envs as envs_vllm
 from torch import nn
 from vllm.config import VllmConfig, get_current_vllm_config
@@ -415,6 +432,10 @@ class AscendSFAImpl(MLAAttentionImpl):
 
         self.local_num_heads = self.num_heads
         self.vllm_config = get_current_vllm_config()
+        _additional_config = self.vllm_config.additional_config or {}
+        self.tq_key_quant_mode = int(_additional_config.get("tq_key_quant_mode", 3))
+        self.tq_value_quant_mode = int(_additional_config.get("tq_value_quant_mode", self.tq_key_quant_mode))
+        self.tq_tile_size = int(_additional_config.get("tq_tile_size", 128))
         self.is_kv_producer = (
             self.vllm_config.kv_transfer_config is not None and self.vllm_config.kv_transfer_config.is_kv_producer
         )
@@ -758,6 +779,32 @@ class AscendSFAImpl(MLAAttentionImpl):
         # npu_kv_rmsnorm_rope_cache needs [B, N, S, D]
         kv_no_split = kv_no_split.view(B, N, S, self.kv_lora_rank + self.qk_rope_head_dim)
         cache_mode = "PA"
+        if kv_cache[0].dtype == torch.int8:  # TQ 4-bit latent storage
+            _tls = _tq_store()
+            _kvc = kv_no_split[..., : self.kv_lora_rank].reshape(-1, self.kv_lora_rank)
+            _kpe = kv_no_split[..., self.kv_lora_rank :]
+            _kvc_n = torch_npu.npu_rms_norm(_kvc, self.kv_a_layernorm.weight, self.kv_a_layernorm.variance_epsilon)[0]
+            _slot8, _wsc = _tls.compress_kernel(_kvc_n, head_dim=self.kv_lora_rank)
+            _slot = _slot8.view(torch.int8)
+            _kpe_r = torch_npu.npu_interleave_rope(_kpe, cos, sin).reshape(-1, self.qk_rope_head_dim)
+            _packed = _tq_packed_bytes(self.kv_lora_rank)
+            _rope_bytes = self.qk_rope_head_dim * 2
+            _nib = _slot[:, :_packed]; _vn = _slot[:, _packed:_packed + 2]
+            _ts2 = _tq_store()
+            _lutsq = _ts2.lutsq(_nib.device, head_dim=self.kv_lora_rank)  # graph-safe gather+sum
+            _inv = torch.rsqrt(_lutsq[_nib.long()].sum(-1, keepdim=True) + 1e-16)
+            _vnf = _vn.contiguous().view(torch.float16).float().view(-1, 1)
+            _sc = (_vnf * _inv).to(torch.float16).view(torch.uint8).view(-1, 2)
+            _rb = _kpe_r.to(torch.bfloat16).contiguous().view(torch.uint8).view(-1, _rope_bytes).view(torch.int8)
+            _comb = torch.cat([_nib.view(torch.int8), _rb.view(torch.int8), _sc.view(torch.int8)], dim=-1)
+            torch_npu.npu_scatter_nd_update_(kv_cache[0].view(-1, _comb.shape[-1]), slots.view(-1, 1), _comb.view(-1, _comb.shape[-1]))
+            if self.enable_dsa_cp:
+                # DSA-CP (FlashComm1): return the packed int8 slot so the caller can
+                # all-gather the 4-bit KV across CP ranks. Keeping the cross-rank KV
+                # communication in packed 4-bit (vs bf16 k_pe/k_nope) preserves TQ4's
+                # bandwidth benefit. k_pe is folded inside the packed slot, so it is None.
+                return None, _comb
+            return None, None
 
         if self.enable_dsa_cp:
             _, _, k_pe, k_nope = torch_npu.npu_kv_rmsnorm_rope_cache(
@@ -1012,7 +1059,16 @@ class AscendSFAImpl(MLAAttentionImpl):
         block_table = attn_metadata.block_table
         kv = kv_cache[0]
         key_rope = kv_cache[1]
-
+        if kv.dtype == torch.int8:  # TQ4 4-bit latent: fused csrc op reads int8 directly (no dequant roundtrip)
+            _ts = _tq_store()
+            _q = torch.cat([_ts.had_fwd(ql_nope, head_dim=self.kv_lora_rank), q_pe], dim=-1).contiguous()
+            _ao = torch.ops._C_ascend.turboquant_sparse_flash_attention(
+                _q, kv, kv, topk_indices, None, None, block_table,
+                actual_seq_lengths_query, actual_seq_lengths_key,
+                float(self.scale), self.tq_key_quant_mode, self.tq_value_quant_mode, 1, "TND", "PA_BSND",
+                3, 9223372036854775807, 9223372036854775807, 2, 1, self.tq_tile_size,
+                self.qk_rope_head_dim)
+            return _ts.had_inv(_ao, head_dim=self.kv_lora_rank)
         attn_output = torch.ops._C_ascend.npu_sparse_flash_attention(
             query=ql_nope,
             key=kv,
@@ -1111,13 +1167,34 @@ class AscendSFAImpl(MLAAttentionImpl):
             else:
                 k_pe, k_nope = self.exec_kv(kv_no_split, cos, sin, kv_cache, slot_mapping, attn_metadata)
 
+            # TQ4 4-bit latent: exec_kv returns the packed int8 slot (in k_nope, k_pe=None)
+            # instead of bf16 k_pe/k_nope. Under DSA-CP we all-gather that packed slot
+            # directly so cross-rank KV stays in 4-bit.
+            _tq_cp = kv_cache is not None and kv_cache[0].dtype == torch.int8
+            fused_comb = None
+
             if self.enable_dsa_cp:
-                assert k_pe is not None
-                assert k_nope is not None
                 assert k_li is not None
                 async_op = self.enable_dsa_cp_with_layer_shard or full_gather_o_proj_enabled
                 # support all_gather kv async for communication calculation overlap
-                if not self.use_sparse_c8_indexer:
+                if _tq_cp:
+                    _comb_local = k_nope  # packed int8 slot [T, slot_bytes]
+                    assert _comb_local is not None
+                    if not self.use_sparse_c8_indexer:
+                        fused_comb, _ = all_gather_async(
+                            _comb_local.view(-1, _comb_local.shape[-1]), get_tp_group(), async_op=async_op
+                        )
+                        k_li, kv_ag_handle = all_gather_async(k_li, get_tp_group(), async_op=async_op)
+                    else:
+                        assert k_li_scale is not None
+                        fused_comb, _ = all_gather_async(
+                            _comb_local.view(-1, _comb_local.shape[-1]), get_tp_group(), async_op=async_op
+                        )
+                        k_li, _ = all_gather_async(k_li, get_tp_group(), async_op=async_op)
+                        k_li_scale, kv_ag_handle = all_gather_async(k_li_scale, get_tp_group(), async_op=async_op)
+                elif not self.use_sparse_c8_indexer:
+                    assert k_pe is not None
+                    assert k_nope is not None
                     fused_kv_no_split, kv_ag_handle = all_gather_async(
                         torch.cat(
                             [
@@ -1131,6 +1208,8 @@ class AscendSFAImpl(MLAAttentionImpl):
                         async_op=async_op,
                     )
                 else:
+                    assert k_pe is not None
+                    assert k_nope is not None
                     # due to different dtypes, we have to split commu pass
                     assert k_li_scale is not None
                     fused_kv_no_split, _ = all_gather_async(
@@ -1172,22 +1251,33 @@ class AscendSFAImpl(MLAAttentionImpl):
                     )
 
                 if kv_cache is not None:
-                    assert fused_kv_no_split is not None
-                    if not self.use_sparse_c8_indexer:
-                        k_pe, k_nope, k_li = fused_kv_no_split.split(
-                            [self.qk_rope_head_dim, self.kv_lora_rank, self.head_dim], dim=-1
+                    if _tq_cp:
+                        # TQ4: scatter the gathered full-sequence packed int8 slots into
+                        # the local KV cache (SFA reads/unpacks the 4-bit slot directly).
+                        assert fused_comb is not None
+                        _n = attn_metadata.num_actual_tokens
+                        torch_npu.npu_scatter_nd_update_(
+                            kv_cache[0].view(-1, fused_comb.shape[-1]),
+                            slot_mapping[:_n].view(-1, 1),
+                            fused_comb[:_n].view(-1, fused_comb.shape[-1]),
                         )
                     else:
-                        k_pe, k_nope = fused_kv_no_split.split([self.qk_rope_head_dim, self.kv_lora_rank], dim=-1)
-                    k_nope = k_nope.view(k_nope.shape[0], 1, -1)
-                    k_pe = k_pe.view(k_pe.shape[0], 1, -1)
-                    DeviceOperator.reshape_and_cache(
-                        key=k_nope[: attn_metadata.num_actual_tokens],
-                        value=k_pe[: attn_metadata.num_actual_tokens],
-                        key_cache=kv_cache[0],
-                        value_cache=kv_cache[1],
-                        slot_mapping=slot_mapping[: attn_metadata.num_actual_tokens],
-                    )
+                        assert fused_kv_no_split is not None
+                        if not self.use_sparse_c8_indexer:
+                            k_pe, k_nope, k_li = fused_kv_no_split.split(
+                                [self.qk_rope_head_dim, self.kv_lora_rank, self.head_dim], dim=-1
+                            )
+                        else:
+                            k_pe, k_nope = fused_kv_no_split.split([self.qk_rope_head_dim, self.kv_lora_rank], dim=-1)
+                        k_nope = k_nope.view(k_nope.shape[0], 1, -1)
+                        k_pe = k_pe.view(k_pe.shape[0], 1, -1)
+                        DeviceOperator.reshape_and_cache(
+                            key=k_nope[: attn_metadata.num_actual_tokens],
+                            value=k_pe[: attn_metadata.num_actual_tokens],
+                            key_cache=kv_cache[0],
+                            value_cache=kv_cache[1],
+                            slot_mapping=slot_mapping[: attn_metadata.num_actual_tokens],
+                        )
 
             k_li = self._get_full_kv(k_li, attn_metadata)
 
@@ -1261,3 +1351,4 @@ class AscendSFAImpl(MLAAttentionImpl):
         maybe_save_kv_layer_to_connector(layer_name, list(kv_cache))
 
         return output_padded
+
