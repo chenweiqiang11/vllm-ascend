@@ -798,6 +798,12 @@ class AscendSFAImpl(MLAAttentionImpl):
             _rb = _kpe_r.to(torch.bfloat16).contiguous().view(torch.uint8).view(-1, _rope_bytes).view(torch.int8)
             _comb = torch.cat([_nib.view(torch.int8), _rb.view(torch.int8), _sc.view(torch.int8)], dim=-1)
             torch_npu.npu_scatter_nd_update_(kv_cache[0].view(-1, _comb.shape[-1]), slots.view(-1, 1), _comb.view(-1, _comb.shape[-1]))
+            if self.enable_dsa_cp:
+                # DSA-CP (FlashComm1): return the packed int8 slot so the caller can
+                # all-gather the 4-bit KV across CP ranks. Keeping the cross-rank KV
+                # communication in packed 4-bit (vs bf16 k_pe/k_nope) preserves TQ4's
+                # bandwidth benefit. k_pe is folded inside the packed slot, so it is None.
+                return None, _comb
             return None, None
 
         if self.enable_dsa_cp:
@@ -1161,13 +1167,34 @@ class AscendSFAImpl(MLAAttentionImpl):
             else:
                 k_pe, k_nope = self.exec_kv(kv_no_split, cos, sin, kv_cache, slot_mapping, attn_metadata)
 
+            # TQ4 4-bit latent: exec_kv returns the packed int8 slot (in k_nope, k_pe=None)
+            # instead of bf16 k_pe/k_nope. Under DSA-CP we all-gather that packed slot
+            # directly so cross-rank KV stays in 4-bit.
+            _tq_cp = kv_cache is not None and kv_cache[0].dtype == torch.int8
+            fused_comb = None
+
             if self.enable_dsa_cp:
-                assert k_pe is not None
-                assert k_nope is not None
                 assert k_li is not None
                 async_op = self.enable_dsa_cp_with_layer_shard or full_gather_o_proj_enabled
                 # support all_gather kv async for communication calculation overlap
-                if not self.use_sparse_c8_indexer:
+                if _tq_cp:
+                    _comb_local = k_nope  # packed int8 slot [T, slot_bytes]
+                    assert _comb_local is not None
+                    if not self.use_sparse_c8_indexer:
+                        fused_comb, _ = all_gather_async(
+                            _comb_local.view(-1, _comb_local.shape[-1]), get_tp_group(), async_op=async_op
+                        )
+                        k_li, kv_ag_handle = all_gather_async(k_li, get_tp_group(), async_op=async_op)
+                    else:
+                        assert k_li_scale is not None
+                        fused_comb, _ = all_gather_async(
+                            _comb_local.view(-1, _comb_local.shape[-1]), get_tp_group(), async_op=async_op
+                        )
+                        k_li, _ = all_gather_async(k_li, get_tp_group(), async_op=async_op)
+                        k_li_scale, kv_ag_handle = all_gather_async(k_li_scale, get_tp_group(), async_op=async_op)
+                elif not self.use_sparse_c8_indexer:
+                    assert k_pe is not None
+                    assert k_nope is not None
                     fused_kv_no_split, kv_ag_handle = all_gather_async(
                         torch.cat(
                             [
@@ -1181,6 +1208,8 @@ class AscendSFAImpl(MLAAttentionImpl):
                         async_op=async_op,
                     )
                 else:
+                    assert k_pe is not None
+                    assert k_nope is not None
                     # due to different dtypes, we have to split commu pass
                     assert k_li_scale is not None
                     fused_kv_no_split, _ = all_gather_async(
@@ -1222,22 +1251,33 @@ class AscendSFAImpl(MLAAttentionImpl):
                     )
 
                 if kv_cache is not None:
-                    assert fused_kv_no_split is not None
-                    if not self.use_sparse_c8_indexer:
-                        k_pe, k_nope, k_li = fused_kv_no_split.split(
-                            [self.qk_rope_head_dim, self.kv_lora_rank, self.head_dim], dim=-1
+                    if _tq_cp:
+                        # TQ4: scatter the gathered full-sequence packed int8 slots into
+                        # the local KV cache (SFA reads/unpacks the 4-bit slot directly).
+                        assert fused_comb is not None
+                        _n = attn_metadata.num_actual_tokens
+                        torch_npu.npu_scatter_nd_update_(
+                            kv_cache[0].view(-1, fused_comb.shape[-1]),
+                            slot_mapping[:_n].view(-1, 1),
+                            fused_comb[:_n].view(-1, fused_comb.shape[-1]),
                         )
                     else:
-                        k_pe, k_nope = fused_kv_no_split.split([self.qk_rope_head_dim, self.kv_lora_rank], dim=-1)
-                    k_nope = k_nope.view(k_nope.shape[0], 1, -1)
-                    k_pe = k_pe.view(k_pe.shape[0], 1, -1)
-                    DeviceOperator.reshape_and_cache(
-                        key=k_nope[: attn_metadata.num_actual_tokens],
-                        value=k_pe[: attn_metadata.num_actual_tokens],
-                        key_cache=kv_cache[0],
-                        value_cache=kv_cache[1],
-                        slot_mapping=slot_mapping[: attn_metadata.num_actual_tokens],
-                    )
+                        assert fused_kv_no_split is not None
+                        if not self.use_sparse_c8_indexer:
+                            k_pe, k_nope, k_li = fused_kv_no_split.split(
+                                [self.qk_rope_head_dim, self.kv_lora_rank, self.head_dim], dim=-1
+                            )
+                        else:
+                            k_pe, k_nope = fused_kv_no_split.split([self.qk_rope_head_dim, self.kv_lora_rank], dim=-1)
+                        k_nope = k_nope.view(k_nope.shape[0], 1, -1)
+                        k_pe = k_pe.view(k_pe.shape[0], 1, -1)
+                        DeviceOperator.reshape_and_cache(
+                            key=k_nope[: attn_metadata.num_actual_tokens],
+                            value=k_pe[: attn_metadata.num_actual_tokens],
+                            key_cache=kv_cache[0],
+                            value_cache=kv_cache[1],
+                            slot_mapping=slot_mapping[: attn_metadata.num_actual_tokens],
+                        )
 
             k_li = self._get_full_kv(k_li, attn_metadata)
 
