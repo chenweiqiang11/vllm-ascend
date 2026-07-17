@@ -671,11 +671,13 @@ QSFAVectorService<QSFAT>::Tq4DequantRows(LocalTensor<KV_T> &srcTensor, LocalTens
         // that same region (written by the Gather above, already drained), so the `cur` Muls carry no
         // mutual RAW/WAR hazard and need no barrier between them. One V-drain after the last Muls, then
         // a single batched output Cast over all `cur` rows (workBase and dstB16 are both row-contiguous).
+        float tq4Sc[TQ4_DEQUANT_CHUNK];
         for (int32_t rr = 0; rr < cur; ++rr) {
-            int32_t r = base + rr;
-            uint16_t sbits = slotU16.GetValue((r * ROW_BYTES + SCALE_BYTE) / 2);
-            half scale = *reinterpret_cast<half *>(&sbits);
-            Muls(workBase[rr * HD], workBase[rr * HD], static_cast<float>(scale), HD);
+            uint16_t sbits = slotU16.GetValue(((base + rr) * ROW_BYTES + SCALE_BYTE) / 2);
+            tq4Sc[rr] = static_cast<float>(*reinterpret_cast<half *>(&sbits));
+        }
+        for (int32_t rr = 0; rr < cur; ++rr) {
+            Muls(workBase[rr * HD], workBase[rr * HD], tq4Sc[rr], HD);
         }
 
         PipeBarrier<PIPE_V>();
@@ -686,7 +688,8 @@ QSFAVectorService<QSFAT>::Tq4DequantRows(LocalTensor<KV_T> &srcTensor, LocalTens
         }
         PipeBarrier<PIPE_V>();
     }
-    PipeBarrier<PIPE_ALL>();
+    SetFlag<AscendC::HardEvent::V_MTE3>(0);
+    WaitFlag<AscendC::HardEvent::V_MTE3>(0);
 }
 
 template <typename QSFAT>
