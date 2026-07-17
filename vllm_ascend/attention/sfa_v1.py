@@ -1,9 +1,24 @@
+# TQ_RW_PATCHED
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar
 
 import scipy  # type: ignore
+import os
 import torch
 import torch_npu
+
+
+def _tq_store():
+    from vllm_ascend.turboquant import tq_latent_store as _tls
+    return _tls
+
+
+def _tq_packed_bytes(kv_lora_rank: int) -> int:
+    return kv_lora_rank // 2
+
+
+def _tq_fused_slot_bytes(kv_lora_rank: int, qk_rope_head_dim: int) -> int:
+    return _tq_packed_bytes(kv_lora_rank) + qk_rope_head_dim * 2 + 2
 import vllm.envs as envs_vllm
 from torch import nn
 from vllm.config import VllmConfig, get_current_vllm_config
@@ -594,6 +609,11 @@ class AscendSFAImpl(MLAAttentionImpl):
         ascend_config = get_ascend_config()
         self.enable_shared_expert_dp = ascend_config.enable_shared_expert_dp
         self.vllm_config = get_current_vllm_config()
+        _additional_config = self.vllm_config.additional_config or {}
+        self.tq_key_quant_mode = int(_additional_config.get("tq_key_quant_mode", 3))
+        self.tq_value_quant_mode = int(_additional_config.get("tq_value_quant_mode", self.tq_key_quant_mode))
+        self.tq_tile_size = int(_additional_config.get("tq_tile_size", 128))
+        self.use_tq_latent = bool(_additional_config.get("enable_tq_latent", False))
         kv_transfer_config = self.vllm_config.kv_transfer_config
         self.is_kv_producer = kv_transfer_config is not None and kv_transfer_config.is_kv_producer
         self.is_kv_consumer = kv_transfer_config is not None and kv_transfer_config.is_kv_consumer
@@ -667,6 +687,12 @@ class AscendSFAImpl(MLAAttentionImpl):
                 self.kv_lora_rank,
                 self.qk_rope_head_dim,
                 self.sfa_qsfa_tile_size,
+            )
+        if self.use_tq_latent:
+            # TQ4 4-bit latent: override packed slot to the TurboQuant fused slot
+            # (int4 nope + bf16 rope + fp16 scale), replacing the 8-bit qsfa slot.
+            self.sfa_qsfa_packed_kv_head_dim = _tq_fused_slot_bytes(
+                self.kv_lora_rank, self.qk_rope_head_dim
             )
         # PD decode consumers with sparse C8 can use mla_prolog_v3 to write the packed KV cache.
         # TODO: Re-enable after the community CANN baseline upgrades from 9.0 to 9.1.
@@ -1204,6 +1230,30 @@ class AscendSFAImpl(MLAAttentionImpl):
         # npu_kv_rmsnorm_rope_cache needs [B, N, S, D]
         kv_no_split = kv_no_split.view(B, N, S, self.kv_lora_rank + self.qk_rope_head_dim)
         cache_mode = "PA"
+        if self.use_tq_latent:  # TQ 4-bit latent storage
+            _tls = _tq_store()
+            _kvc = kv_no_split[..., : self.kv_lora_rank].reshape(-1, self.kv_lora_rank)
+            _kpe = kv_no_split[..., self.kv_lora_rank :]
+            _kvc_n = torch_npu.npu_rms_norm(_kvc, self.kv_a_layernorm.weight, self.kv_a_layernorm.variance_epsilon)[0]
+            _slot8, _wsc = _tls.compress_kernel(_kvc_n, head_dim=self.kv_lora_rank)
+            _slot = _slot8.view(torch.int8)
+            _kpe_r = torch_npu.npu_interleave_rope(_kpe, cos, sin).reshape(-1, self.qk_rope_head_dim)
+            _packed = _tq_packed_bytes(self.kv_lora_rank)
+            _rope_bytes = self.qk_rope_head_dim * 2
+            _nib = _slot[:, :_packed]; _vn = _slot[:, _packed:_packed + 2]
+            _ts2 = _tq_store()
+            _lutsq = _ts2.lutsq(_nib.device, head_dim=self.kv_lora_rank)
+            _inv = torch.rsqrt(_lutsq[_nib.long()].sum(-1, keepdim=True) + 1e-16)
+            _vnf = _vn.contiguous().view(torch.float16).float().view(-1, 1)
+            _sc_f = (_vnf * _inv)
+            _sc = _sc_f.to(torch.float16).view(torch.uint8).view(-1, 2)
+            # [O8 pre-divide] store K_rope' = K_rope / s_t; attention re-applies s_t per-column.
+            _rb = (_kpe_r.float() / (_sc_f + 1e-20)).to(torch.bfloat16).contiguous().view(torch.uint8).view(-1, _rope_bytes).view(torch.int8)
+            _comb = torch.cat([_nib.view(torch.int8), _rb.view(torch.int8), _sc.view(torch.int8)], dim=-1)
+            torch_npu.npu_scatter_nd_update_(kv_cache[0].view(-1, _comb.shape[-1]), slots.view(-1, 1), _comb.view(-1, _comb.shape[-1]))
+            if self.enable_dsa_cp:
+                return None, _comb
+            return None, None
 
         use_custom_kv = self.use_sparse_c8_sfa and (
             get_ascend_device_type() != AscendDeviceType.A5 or self.enable_dsa_cp or not self.has_indexer
@@ -1508,6 +1558,17 @@ class AscendSFAImpl(MLAAttentionImpl):
     def _execute_sparse_flash_attention_process(
         self, ql_nope, q_pe, kv_cache, topk_indices, attn_metadata, actual_seq_lengths_query, actual_seq_lengths_key
     ):
+        kv = kv_cache[0]
+        if self.use_tq_latent:  # TQ4 4-bit latent: fused csrc op reads int8 directly
+            _ts = _tq_store()
+            _q = torch.cat([_ts.had_fwd(ql_nope, head_dim=self.kv_lora_rank), q_pe], dim=-1).contiguous()
+            _ao = torch.ops._C_ascend.turboquant_sparse_flash_attention(
+                _q, kv, kv, topk_indices, None, None, attn_metadata.block_table,
+                actual_seq_lengths_query, actual_seq_lengths_key,
+                float(self.scale), self.tq_key_quant_mode, self.tq_value_quant_mode, 1, "TND", "PA_BSND",
+                3, 9223372036854775807, 9223372036854775807, 2, 1, self.tq_tile_size,
+                self.qk_rope_head_dim)
+            return _ts.had_inv(_ao, head_dim=self.kv_lora_rank)
         return DeviceOperator.execute_sparse_flash_attention_process(
             self,
             ql_nope,
@@ -1684,6 +1745,7 @@ class AscendSFAImpl(MLAAttentionImpl):
 
             if (
                 self.use_sparse_c8_sfa
+                and not self.use_tq_latent
                 and not self.enable_dsa_cp
                 and (get_ascend_device_type() != AscendDeviceType.A5 or not self.has_indexer)
             ):

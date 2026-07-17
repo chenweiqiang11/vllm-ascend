@@ -1756,6 +1756,31 @@ void store_kv_block(
 
 } 
 
+
+at::Tensor turboquant_sparse_flash_attention_meta(
+    const at::Tensor &query, const at::Tensor &key, const at::Tensor &value,
+    const at::Tensor &sparse_indices,
+    const c10::optional<at::Tensor> &key_dequant_scale,
+    const c10::optional<at::Tensor> &value_dequant_scale,
+    const c10::optional<at::Tensor> &block_table,
+    const c10::optional<at::Tensor> &actual_seq_lengths_query,
+    const c10::optional<at::Tensor> &actual_seq_lengths_kv,
+    double scale_value, int64_t key_quant_mode, int64_t value_quant_mode,
+    int64_t sparse_block_size, c10::string_view layout_query, c10::string_view layout_kv,
+    int64_t sparse_mode, int64_t pre_tokens, int64_t next_tokens, int64_t attention_mode,
+    int64_t quant_scale_repo_mode, int64_t tile_size, int64_t rope_head_dim)
+{
+    auto query_shape = query.sizes();
+    at::Tensor output = at::empty(
+        {query_shape[0], query_shape[1], query_shape[2] - rope_head_dim}, query.options().dtype(query.dtype()));
+    return output;
+}
+
+at::Tensor turbo_quant_compress_latent_meta(const at::Tensor &latent, const at::Tensor &centroids)
+{
+    at::Tensor slot = at::empty({latent.size(0), 320}, latent.options().dtype(at::kByte));
+    return slot;
+}
 } // namespace meta
 } // namespace vllm_ascend
 
@@ -1813,6 +1838,8 @@ TORCH_LIBRARY_IMPL_EXPAND(CONCAT(_C, _ascend), Meta, ops) {
     ops.impl("npu_lightning_indexer", &vllm_ascend::meta::npu_lightning_indexer_meta);
     // Sparse flash attention
     ops.impl("npu_sparse_flash_attention", &vllm_ascend::meta::npu_sparse_flash_attention_meta);
+    ops.impl("turboquant_sparse_flash_attention", &vllm_ascend::meta::turboquant_sparse_flash_attention_meta);
+    ops.impl("turbo_quant_compress_latent", &vllm_ascend::meta::turbo_quant_compress_latent_meta);
     ops.impl("npu_kv_quant_sparse_flash_attention",
              &vllm_ascend::meta::npu_kv_quant_sparse_flash_attention_meta);
     // MoE dispatch-ffn-combine
