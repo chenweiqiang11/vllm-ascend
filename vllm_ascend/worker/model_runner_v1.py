@@ -388,6 +388,7 @@ class NPUModelRunner(GPUModelRunner):
         # dsa c8
         self.enable_sparse_sfa_c8 = self.ascend_config.enable_sparse_sfa_c8
         self.enable_sparse_li_c8 = self.ascend_config.enable_sparse_li_c8
+        self.use_tq_latent = self.ascend_config.enable_tq_latent
         if self.enable_sparse_sfa_c8 or self.enable_sparse_li_c8:
             if get_ascend_device_type() == AscendDeviceType.A5:
                 self.c8_k_cache_dtype = torch.float8_e4m3fn
@@ -4898,6 +4899,14 @@ class NPUModelRunner(GPUModelRunner):
                             self.model_config.hf_text_config.kv_lora_rank,
                             self.model_config.hf_text_config.qk_rope_head_dim,
                         )
+                        if self.use_tq_latent:
+                            # TQ4 4-bit latent: smaller fused slot
+                            # (int4 nope + bf16 rope + fp16 scale).
+                            packed_kv_head_dim = (
+                                self.model_config.hf_text_config.kv_lora_rank // 2
+                                + self.model_config.hf_text_config.qk_rope_head_dim * 2
+                                + 2
+                            )
                         sparse_head_dim = (
                             packed_kv_head_dim,
                             0,
