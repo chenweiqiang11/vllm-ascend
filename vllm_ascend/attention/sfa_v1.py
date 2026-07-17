@@ -794,8 +794,12 @@ class AscendSFAImpl(MLAAttentionImpl):
             _lutsq = _ts2.lutsq(_nib.device, head_dim=self.kv_lora_rank)  # graph-safe gather+sum
             _inv = torch.rsqrt(_lutsq[_nib.long()].sum(-1, keepdim=True) + 1e-16)
             _vnf = _vn.contiguous().view(torch.float16).float().view(-1, 1)
-            _sc = (_vnf * _inv).to(torch.float16).view(torch.uint8).view(-1, 2)
-            _rb = _kpe_r.to(torch.bfloat16).contiguous().view(torch.uint8).view(-1, _rope_bytes).view(torch.int8)
+            _sc_f = (_vnf * _inv)                                   # s_t (totalScale) float [N,1]
+            _sc = _sc_f.to(torch.float16).view(torch.uint8).view(-1, 2)
+            # [O8 pre-divide attention-fold] store K_rope' = K_rope / s_t so the fused cube MMAD#1 yields
+            # F = true_score/s_t; the SFA attention side (DealBmm1ResBaseBlock) re-applies s_t per-column
+            # (pre/post-softmax Mul). Pairs with the dequant dropping its per-row Muls(s_t) + O9 s_t export.
+            _rb = (_kpe_r.float() / (_sc_f + 1e-20)).to(torch.bfloat16).contiguous().view(torch.uint8).view(-1, _rope_bytes).view(torch.int8)
             _comb = torch.cat([_nib.view(torch.int8), _rb.view(torch.int8), _sc.view(torch.int8)], dim=-1)
             torch_npu.npu_scatter_nd_update_(kv_cache[0].view(-1, _comb.shape[-1]), slots.view(-1, 1), _comb.view(-1, _comb.shape[-1]))
             if self.enable_dsa_cp:
