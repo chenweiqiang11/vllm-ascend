@@ -613,7 +613,8 @@ class AscendSFAImpl(MLAAttentionImpl):
         self.tq_key_quant_mode = int(_additional_config.get("tq_key_quant_mode", 3))
         self.tq_value_quant_mode = int(_additional_config.get("tq_value_quant_mode", self.tq_key_quant_mode))
         self.tq_tile_size = int(_additional_config.get("tq_tile_size", 128))
-        self.use_tq_latent = bool(_additional_config.get("enable_tq_latent", False))
+        _tq_cache_dtype = getattr(self.vllm_config.cache_config, "cache_dtype", "auto")
+        self.use_tq_latent = (_tq_cache_dtype == "turboquant_4bit_nc")
         kv_transfer_config = self.vllm_config.kv_transfer_config
         self.is_kv_producer = kv_transfer_config is not None and kv_transfer_config.is_kv_producer
         self.is_kv_consumer = kv_transfer_config is not None and kv_transfer_config.is_kv_consumer
@@ -670,8 +671,12 @@ class AscendSFAImpl(MLAAttentionImpl):
         # - C8 indexer cache for lightning indexer.
         # The user-facing switches control these layouts independently, and
         # layers without an indexer only apply the SFA setting.
-        self.enable_sparse_sfa_c8 = ascend_config.enable_sparse_sfa_c8
-        self.enable_sparse_li_c8 = self.has_indexer and ascend_config.is_sparse_li_c8_layer(self.layer_name)
+        # TQ4 (turboquant_4bit_nc) reuses the packed-SFA + int8-indexer c8 layout, so it
+        # self-enables both switches without the user setting enable_sparse_*_c8.
+        self.enable_sparse_sfa_c8 = ascend_config.enable_sparse_sfa_c8 or self.use_tq_latent
+        self.enable_sparse_li_c8 = self.has_indexer and (
+            ascend_config.is_sparse_li_c8_layer(self.layer_name) or self.use_tq_latent
+        )
         if self.enable_sparse_sfa_c8 or self.enable_sparse_li_c8:
             if get_ascend_device_type() == AscendDeviceType.A5:
                 self.c8_k_cache_dtype = torch.float8_e4m3fn
