@@ -124,6 +124,9 @@ if not _npu_available:
     sys.modules["torch_npu"].npu_rms_norm = MagicMock()  # type: ignore[attr-defined]
     sys.modules["torch_npu"].npu_swiglu = MagicMock()  # type: ignore[attr-defined]
     sys.modules["torch_npu"].npu_convert_weight_to_int4pack = MagicMock()  # type: ignore[attr-defined]
+    sys.modules["torch_npu"].npu_transpose_batchmatmul = MagicMock()  # type: ignore[attr-defined]
+    sys.modules["torch_npu"].npu_scatter_nd_update_ = MagicMock()  # type: ignore[attr-defined]
+    sys.modules["torch_npu"].npu_dynamic_mx_quant = MagicMock()  # type: ignore[attr-defined]
 
 adapt_patch()
 adapt_patch(True)
@@ -164,6 +167,6 @@ def _mock_ascend_store_deps(request):
     with (
         patch(f"{_pfx}.pool_worker.get_attention_compute_start_gate"),
         patch(f"{_pfx}.pool_worker.reset_attention_compute_start_gate"),
-        patch(f"{_pfx}.config_data.AttentionComputeStartGate", type("AttentionComputeStartGate", (), {})),
+        patch(f"{_pfx}.metadata.AttentionComputeStartGate", type("AttentionComputeStartGate", (), {})),
     ):
         yield

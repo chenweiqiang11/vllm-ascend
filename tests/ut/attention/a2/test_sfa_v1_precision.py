@@ -19,7 +19,7 @@
 import math
 import os
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -306,6 +306,7 @@ def _run_sfa_kernel(
     """Call kernel via MagicMock self (only ``scale`` needed)."""
     fake_self = MagicMock()
     fake_self.scale = scale
+    fake_self.enable_sparse_sfa_turboquant = False
 
     fake_attn_metadata = MagicMock()
     fake_attn_metadata.block_table = block_table
@@ -467,6 +468,7 @@ def _run_precision_check(
     )
 
 
+@patch("vllm_ascend.quantization.utils.detect_quantization_method", new=MagicMock(return_value=None))
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
 @pytest.mark.parametrize("model", ["deepseek-ai/DeepSeek-V3.2-Exp"])
 @pytest.mark.parametrize("batch_spec_name", list(BATCH_SPECS.keys()))

@@ -104,6 +104,10 @@ function(op_add_subdirectory OP_LIST OP_DIR_LIST)
         endif()
         get_filename_component(OP_NAME "${OP_DIR}" NAME)
 
+        if ("${OP_NAME}" STREQUAL "turbo_quant_sparse_flash_attention" AND "${ASCEND_COMPUTE_UNIT}" MATCHES "ascend950")
+            continue()
+        endif ()
+
         if (NOT BUILD_OPEN_PROJECT)
             if (EXISTS ${TOP_DIR}/asl/ops/cann/ops/built-in/tbe/impl/ascendc/${OP_NAME})
                 continue()
@@ -642,12 +646,10 @@ function(add_bin_compile_target)
         set(BINARY_INFO_CONFIG_FILE ${BIN_OUT_DIR}/binary_info_config.json)
         set(RELOCATABLE_KERNEL_INFO_CONFIG_FILE ${BIN_OUT_DIR}/relocatable_kernel_info_config.json)
 
-        add_custom_command(OUTPUT ${BINARY_INFO_CONFIG_FILE}
-                COMMAND ${HI_PYTHON} ${ASCENDC_CMAKE_UTIL_DIR}/ascendc_ops_config.py -p ${BIN_OUT_DIR} -s ${BINARY_COMPUTE_UNIT}
-        )
-
         add_custom_target(${OPS_CONFIG_TARGET}
-                DEPENDS ${BINARY_INFO_CONFIG_FILE}
+                COMMAND ${HI_PYTHON} ${ASCENDC_CMAKE_UTIL_DIR}/ascendc_ops_config.py
+                        -p ${BIN_OUT_DIR} -s ${BINARY_COMPUTE_UNIT}
+                BYPRODUCTS ${BINARY_INFO_CONFIG_FILE} ${RELOCATABLE_KERNEL_INFO_CONFIG_FILE}
         )
 
         add_dependencies(ops_transformer_config ${OPS_CONFIG_TARGET})
