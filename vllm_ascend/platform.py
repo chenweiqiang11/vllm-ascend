@@ -555,9 +555,6 @@ def _validate_turboquant_cache(vllm_config: VllmConfig) -> None:
     if enable_xlite:
         raise ValueError("turboquant_4bit_nc does not support xLite graph mode")
 
-    if bool(getattr(vllm_config, "use_v2_model_runner", False)):
-        raise ValueError("turboquant_4bit_nc only supports Model Runner V1")
-
     model_config = vllm_config.model_config
     if not model_uses_sfa_sparse(model_config):
         raise ValueError("turboquant_4bit_nc is only supported by SFA sparse models")

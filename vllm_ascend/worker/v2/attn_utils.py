@@ -48,6 +48,7 @@ from vllm_ascend.attention.dsa_v1 import AscendDSAMetadataBuilder
 from vllm_ascend.attention.utils import (
     AscendCommonAttentionMetadata,
     get_sfa_qsfa_packed_head_dim,
+    get_tq_fused_slot_bytes,
 )
 from vllm_ascend.core.kv_cache_interface import (
     AscendMLAAttentionSpec,
@@ -55,7 +56,10 @@ from vllm_ascend.core.kv_cache_interface import (
     AscendSlidingWindowMLASpec,
 )
 from vllm_ascend.quantization.utils import enable_fa_quant
-from vllm_ascend.utils import AscendDeviceType, calc_split_factor, enable_sfa, get_ascend_device_type
+from vllm_ascend.utils import (
+    AscendDeviceType, calc_split_factor, enable_sfa, get_ascend_device_type,
+    kv_cache_spec_uses_packed_sfa_main_cache,
+)
 
 if TYPE_CHECKING:
     from vllm_ascend.worker.v2.pcp_manager import AscendPCPAttentionContext
@@ -67,6 +71,7 @@ def get_kv_cache_spec(vllm_config: VllmConfig) -> dict[str, KVCacheSpec]:
 
     kv_cache_spec: dict[str, KVCacheSpec] = {}
     attention_layer_names: list[str] = []
+    use_turboquant = vllm_config.cache_config.cache_dtype == "turboquant_4bit_nc"
     mamba_specs: dict[str, MambaSpec] = {}
     layer_type = AttentionLayerBase
     attn_layers = get_layers_from_vllm_config(vllm_config, layer_type)
@@ -94,9 +99,16 @@ def get_kv_cache_spec(vllm_config: VllmConfig) -> dict[str, KVCacheSpec]:
 
         if isinstance(attn_module, MLAAttention):
             cache_sparse_sfa_c8 = False
+            use_turboquant_layer = bool(getattr(attn_module.impl, "enable_sparse_sfa_turboquant", False))
             if getattr(attn_module.impl, "fa_quant_layer", False):
                 head_size = attn_module.head_size + attn_module.qk_rope_head_dim
                 dtype, cache_dtype_str = attn_module.impl.dtype, None
+            elif enable_sfa(vllm_config) and use_turboquant_layer:
+                head_size = get_tq_fused_slot_bytes(
+                    attn_module.kv_lora_rank,
+                    vllm_config.model_config.hf_text_config.qk_rope_head_dim,
+                )
+                dtype, cache_dtype_str = torch.int8, None
             elif enable_sfa(vllm_config) and bool(getattr(attn_module.impl, "enable_sparse_sfa_c8", False)):
                 cache_sparse_sfa_c8 = True
                 head_size = get_sfa_qsfa_packed_head_dim(
@@ -125,11 +137,13 @@ def get_kv_cache_spec(vllm_config: VllmConfig) -> dict[str, KVCacheSpec]:
                 head_size=vllm_config.model_config.hf_text_config.index_head_dim,
                 dtype=c8_k_cache_dtype
                 if cache_sparse_li_c8
+                else vllm_config.model_config.dtype
+                if use_turboquant
                 else get_kv_cache_torch_dtype(
                     vllm_config.cache_config.cache_dtype,
                     vllm_config.model_config.dtype,
                 ),
-                cache_dtype_str=vllm_config.cache_config.cache_dtype,
+                cache_dtype_str=None if use_turboquant else vllm_config.cache_config.cache_dtype,
                 scale_dim=1 if cache_sparse_li_c8 else 0,
                 scale_dtype=c8_k_scale_cache_dtype if cache_sparse_li_c8 else torch.int8,
                 cache_sparse_li_c8=cache_sparse_li_c8,
@@ -647,7 +661,7 @@ def _allocate_kv_cache(
             continue
 
         # TODO:Subsequently, extend the `AttentionSpec` class in the vLLM community and remove these branches.
-        if enable_sfa(vllm_config) and bool(getattr(example_spec, "cache_sparse_sfa_c8", False)):
+        if enable_sfa(vllm_config) and kv_cache_spec_uses_packed_sfa_main_cache(example_spec):
             k_size = kv_cache_tensor.size
             k_tensor = _allocate_int8_cache_tensor(k_size, alignment, device)
             for layer_name in kv_cache_tensor.shared_by:
@@ -822,12 +836,12 @@ def _reshape_kv_cache_v2(
                 kv_cache_spec.head_size,
                 cache_dtype,
             )
-            sparse_sfa_c8 = enable_sfa(vllm_config) and bool(getattr(kv_cache_spec, "cache_sparse_sfa_c8", False))
+            packed_sfa_main_cache = enable_sfa(vllm_config) and kv_cache_spec_uses_packed_sfa_main_cache(kv_cache_spec)
             if isinstance(kv_cache_spec, (AscendMLAAttentionSpec, MLAAttentionSpec)):
                 num_blocks_, block_size_, num_kv_heads, _ = kv_cache_shape
                 k_dim, v_dim = _get_attention_kv_cache_dims(layer_name, kv_cache_spec)
                 k_shape = (num_blocks_, block_size_, num_kv_heads, k_dim)
-                if sparse_sfa_c8:
+                if packed_sfa_main_cache:
                     k_shape = (num_blocks_, block_size_, num_kv_heads, kv_cache_spec.head_size)
                     v_dim = 0
                 v_shape = (num_blocks_, block_size_, num_kv_heads, v_dim)
@@ -846,7 +860,7 @@ def _reshape_kv_cache_v2(
                     vllm_config.model_config,
                 )
 
-            if sparse_sfa_c8:
+            if packed_sfa_main_cache:
                 raw_k_tensor = raw_cache
                 k_dtype = torch.float8_e4m3fn if get_ascend_device_type() == AscendDeviceType.A5 else torch.int8
                 k_cache = raw_k_tensor.view(k_dtype).view(k_shape)
@@ -873,7 +887,9 @@ def _reshape_kv_cache_v2(
     return kv_caches
 
 
-_BUILD_ATTN_METADATA_MODULE = vllm.v1.worker.gpu.spec_decode.speculator
+import vllm.v1.worker.gpu.spec_decode.speculator as _speculator
+
+_BUILD_ATTN_METADATA_MODULE = _speculator
 
 
 @contextmanager
