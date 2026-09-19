@@ -117,6 +117,21 @@ class TestAscendConfig(TestBase):
         self.assertTrue(ascend_fusion_config.fusion_ops_gmmswigluquant)
 
     @_clean_up_ascend_config
+    @patch("vllm_ascend.utils.model_uses_sfa_sparse", return_value=True)
+    @patch("vllm_ascend.platform.NPUPlatform.check_and_update_config")
+    def test_turboquant_cache_dtype_drives_internal_sparse_flags(self, _mock_check, _mock_sparse_model):
+        for cache_dtype, expected_turboquant in (("turboquant_4bit_nc", True), ("auto", False)):
+            vllm_config = VllmConfig()
+            vllm_config.cache_config.cache_dtype = cache_dtype
+
+            config = init_ascend_config(vllm_config)
+
+            self.assertEqual(config.enable_sparse_sfa_turboquant, expected_turboquant)
+            self.assertFalse(config.enable_sparse_sfa_c8)
+            self.assertEqual(config.uses_packed_sfa_main_cache, expected_turboquant)
+            self.assertFalse(config.enable_sparse_li_c8)
+
+    @_clean_up_ascend_config
     @patch("vllm_ascend.platform.NPUPlatform.check_and_update_config")
     def test_init_ascend_config_with_additional_config(self, mock_fix_incompatible_config):
         test_vllm_config = VllmConfig()

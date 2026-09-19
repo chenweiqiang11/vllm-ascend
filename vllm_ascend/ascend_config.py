@@ -18,6 +18,7 @@ import json
 import os
 from typing import TYPE_CHECKING, Any
 
+from pydantic import TypeAdapter
 from vllm.logger import logger
 from vllm.utils.math_utils import cdiv
 
@@ -25,6 +26,14 @@ if TYPE_CHECKING:
     from vllm.config import VllmConfig
 
 _CANN_OPS_TRANSFORMER_AVAILABLE = importlib.util.find_spec("cann_ops_transformer") is not None
+
+
+def validate_additional_config_bool(value: Any, path: str) -> bool:
+    """Apply pydantic's bool coercion rules to early config validation."""
+    try:
+        return TypeAdapter(bool).validate_python(value)
+    except ValueError as exc:
+        raise ValueError(f"{path} must be a boolean, got {value!r}.") from exc
 
 
 def is_megamoe_supported_by_config(vllm_config) -> bool:
@@ -283,6 +292,9 @@ class AscendConfig:
                     "enable_kv_nz is only supported in pd scenario and can only be used in D node."
                 )
 
+        cache_config = getattr(vllm_config, "cache_config", None)
+        cache_dtype = getattr(cache_config, "cache_dtype", None)
+        self.enable_sparse_sfa_turboquant = cache_dtype == "turboquant_4bit_nc" and use_sparse
         self.enable_sparse_sfa_c8 = additional_config.get("enable_sparse_sfa_c8", False) and use_sparse
         self.enable_sparse_li_c8 = additional_config.get("enable_sparse_li_c8", False) and use_sparse
         self.c8_enable_reshape_optim = self.enable_sparse_li_c8 and additional_config.get(
@@ -356,14 +368,20 @@ class AscendConfig:
             self.vllm_config,
             additional_config.get("sparse_kv_offload_config", {}),
         )
-        self._validate_sparse_c8_kv_offload_compatibility()
+        self._validate_sparse_packed_kv_offload_compatibility()
 
-    def _validate_sparse_c8_kv_offload_compatibility(self) -> None:
-        if self.sparse_kv_offload_config.enabled and self.enable_sparse_sfa_c8:
+    @property
+    def uses_packed_sfa_main_cache(self) -> bool:
+        """Whether SFA stores its main KV cache in one packed tensor."""
+        return bool(
+            getattr(self, "enable_sparse_sfa_c8", False) or getattr(self, "enable_sparse_sfa_turboquant", False)
+        )
+
+    def _validate_sparse_packed_kv_offload_compatibility(self) -> None:
+        if self.sparse_kv_offload_config.enabled and self.uses_packed_sfa_main_cache:
             raise NotImplementedError(
-                "Sparse KV offload does not support the sparse SFA C8 main "
-                "cache. Disable enable_sparse_sfa_c8; enable_sparse_li_c8 is "
-                "supported because the indexer cache remains device-resident."
+                "Sparse KV offload does not support packed SFA main caches (C8 or TQ4). "
+                "Sparse LI C8 is supported because the indexer cache remains device-resident."
             )
 
     @staticmethod
