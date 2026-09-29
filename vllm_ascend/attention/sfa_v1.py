@@ -32,7 +32,6 @@ from vllm_ascend.attention.utils import (
     ascend_chunked_prefill_workspace_size,
     get_sfa_qsfa_packed_head_dim,
     get_tq_fused_slot_bytes,
-    get_tq_packed_bytes,
     maybe_save_kv_layer_to_connector,
     notify_kv_cache_written,
     trans_rope_weight,
@@ -2047,19 +2046,15 @@ def turboquant_kv_rmsnorm_rope(
     k_rope = torch_npu.npu_interleave_rope(rope_in, cos, sin).reshape(-1, qk_rope_head_dim)
 
     # compress_kernel also returns the Hadamard buffer, alive until the op runs.
-    slot, _hadamard_keepalive = tq_latent_store.compress_kernel(k_nope, head_dim=kv_lora_rank)
-    slot = slot.view(torch.int8)
-    packed_bytes = get_tq_packed_bytes(kv_lora_rank)
-    nibbles = slot[:, :packed_bytes]
-    vec_norm = slot[:, packed_bytes : packed_bytes + 2]
+    nibbles, latent_norm, _hadamard_keepalive = tq_latent_store.compress_kernel(k_nope, head_dim=kv_lora_rank)
+    nibbles = nibbles.view(torch.int8)
 
     # s_t = ||latent|| / ||dequantized unit vector||. The LUT maps a packed byte
     # to the squared centroids of its two nibbles, so the reconstructed norm is a
     # gather + sum with no bit twiddling, which keeps graph capture happy.
     lut_sq = tq_latent_store.lutsq(nibbles.device, head_dim=kv_lora_rank)
     inv_recon_norm = torch.rsqrt(lut_sq[nibbles.long()].sum(-1, keepdim=True) + 1e-16)
-    latent_norm = vec_norm.contiguous().view(torch.float16).float().view(-1, 1)
-    scale = latent_norm * inv_recon_norm
+    scale = latent_norm.float().view(-1, 1) * inv_recon_norm
 
     # Pre-divide the rope half by s_t so attention rescales the whole slot with one
     # per-column multiply instead of a separate rope pass.

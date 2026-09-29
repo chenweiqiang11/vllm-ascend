@@ -85,6 +85,24 @@ def _require_npu():
         raise RuntimeError("torch_npu is required for this NPU-only path")
 
 
+def _turbo_quant_op():
+    """The ops-nn TurboQuant compress entry point.
+
+    ``cann_ops_nn`` comes from the CANN ops-nn torch extension and is only needed
+    on the TQ4 store path, so it is imported lazily: a module-scope import would
+    make every SFA deployment depend on it.
+    """
+    try:
+        import cann_ops_nn
+    except ImportError as exc:
+        raise RuntimeError(
+            "The TurboQuant 4-bit latent cache requires the cann_ops_nn torch "
+            "extension (ops-nn quant/turbo_quant). Install it, or serve without "
+            "--kv-cache-dtype turboquant_4bit_nc."
+        ) from exc
+    return cann_ops_nn.turbo_quant
+
+
 def _build(device, head_dim=HEAD_DIM):
     global _CENT, _PIT, _PI, _LUTSQ, _BUILT
     head_dim = int(head_dim)
@@ -143,10 +161,15 @@ def compress(latent, head_dim=None):
 
 @torch.no_grad()
 def compress_kernel(latent, head_dim=None):
-    """Fused compress via torch op turbo_quant_compress_latent. latent [N,head_dim] (rmsnorm'd, fp16/bf16) ->
-    (slot uint8 [N,base_slot_size(head_dim)], z). Hadamard (1 matmul) in torch; norm/quantize/pack in the
-    csrc kernel (aclnnTurboQuantCompressLatent). Replaces the ~18-op torch compress with: 1 matmul + 1 op call."""
+    """Fused compress via the ops-nn TurboQuant op. latent [N,head_dim] (rmsnorm'd, fp16/bf16) ->
+    (y uint8 [N,head_dim//2], norm fp16 [N], z). Hadamard (1 matmul) in torch; norm/quantize/pack in the
+    kernel. Replaces the ~18-op torch compress with: 1 matmul + 1 op call.
+
+    The op takes the rotated latent un-normalized and returns the per-token L2 norm
+    as a second output rather than packed into the slot.
+    """
     _require_npu()
+    turbo_quant = _turbo_quant_op()
     head_dim = int(latent.shape[-1] if head_dim is None else head_dim)
     _check_head_dim(head_dim)
     _build(latent.device, head_dim)
@@ -154,8 +177,8 @@ def compress_kernel(latent, head_dim=None):
     dev = latent.device
     z = (latent.float() @ _PIT.to(dev)).contiguous()  # Hadamard (un-normalized), fp32
     cent = _CENT.to(dev).contiguous()
-    slot = torch.ops._C_ascend.turbo_quant_compress_latent(z, cent)  # [N,320] uint8, fused norm+quantize+pack
-    return slot, (z,)  # hold z alive until caller scatters (matches prior tuple shape)
+    y, norm = turbo_quant(z, cent)  # nibbles low-first, and the frame norm, in one call
+    return y, norm, (z,)  # hold z alive until the op has consumed it
 
 
 @torch.no_grad()
